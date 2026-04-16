@@ -13,6 +13,7 @@ type ExerciseCardProps = {
   sessionLog?: ExerciseLog;
   isNextUp?: boolean;
   onDraftChange?: (draft: ExerciseLogDraft) => void;
+  onPlayVideo: (label: string, url: string) => void;
   onOpenUrl: (url: string) => void;
   onStartLog?: () => void;
   onSave?: () => void;
@@ -30,6 +31,7 @@ export function ExerciseCard({
   sessionLog,
   isNextUp = false,
   onDraftChange,
+  onPlayVideo,
   onOpenUrl,
   onStartLog,
   onSave,
@@ -52,32 +54,43 @@ export function ExerciseCard({
   return (
     <View style={[styles.card, isCompact ? styles.cardCompact : undefined]}>
       <View style={styles.header}>
-        <View style={styles.headerCopy}>
-          <View style={styles.headerBadges}>
-            <Text style={styles.focusBadge}>{focus}</Text>
-            {mode === 'active' && sessionLog && !isEditing ? (
-              <Text style={styles.loggedBadge}>Logged this workout</Text>
-            ) : null}
-            {mode === 'active' && !sessionLog && isNextUp ? (
-              <Text style={styles.nextBadge}>Up next</Text>
-            ) : null}
-            {mode === 'summary' && sessionLog ? <Text style={styles.loggedBadge}>Completed</Text> : null}
+        <View style={[styles.headerTopRow, isCompact ? styles.headerTopRowCompact : undefined]}>
+          <View style={styles.headerCopy}>
+            <View style={styles.headerBadges}>
+              <Text style={styles.focusBadge}>{focus}</Text>
+              {mode === 'active' && sessionLog && !isEditing ? (
+                <Text style={styles.loggedBadge}>Logged this workout</Text>
+              ) : null}
+              {mode === 'active' && !sessionLog && isNextUp ? (
+                <Text style={styles.nextBadge}>Up next</Text>
+              ) : null}
+              {mode === 'summary' && sessionLog ? <Text style={styles.loggedBadge}>Completed</Text> : null}
+            </View>
+
+            <Text style={[styles.title, isCompact ? styles.titleCompact : undefined]}>
+              {selectedOption.label}
+            </Text>
+            <Text style={[styles.subtitle, isCompact ? styles.subtitleCompact : undefined]}>
+              Prescribed slot: {exercise.options[0]?.label}
+            </Text>
           </View>
 
-          <Text style={[styles.title, isCompact ? styles.titleCompact : undefined]}>
-            {selectedOption.label}
-          </Text>
-          <Text style={[styles.subtitle, isCompact ? styles.subtitleCompact : undefined]}>
-            Prescribed slot: {exercise.options[0]?.label}
-          </Text>
-        </View>
+          <View style={[styles.headerActions, isCompact ? styles.headerActionsCompact : undefined]}>
+            <Pressable
+              onPress={() => onPlayVideo(selectedOption.label, selectedOption.videoUrl)}
+              style={styles.playButton}
+            >
+              <Text style={styles.playButtonText}>Play video</Text>
+            </Pressable>
 
-        <Pressable
-          onPress={() => onOpenUrl(selectedOption.videoUrl)}
-          style={[styles.linkButton, isCompact ? styles.linkButtonCompact : undefined]}
-        >
-          <Text style={styles.linkButtonText}>Watch video</Text>
-        </Pressable>
+            <Pressable
+              onPress={() => onOpenUrl(selectedOption.videoUrl)}
+              style={[styles.linkButton, isCompact ? styles.linkButtonCompact : undefined]}
+            >
+              <Text style={styles.linkButtonText}>Open in YouTube</Text>
+            </Pressable>
+          </View>
+        </View>
       </View>
 
       <View style={styles.optionsRow}>
@@ -255,7 +268,6 @@ function ExerciseLogger({
   onCancel?: () => void;
 }) {
   const currentSetLog = draft.setLogs[draft.setLogs.length - 1];
-  const completedSetLogs = draft.setLogs.slice(0, -1).filter((setLog) => setLog.weight.trim().length > 0);
   const startedSetCount = draft.setLogs.filter(isStartedSet).length;
   const hasIncompleteStartedSet = draft.setLogs.some(
     (setLog) => isStartedSet(setLog) && setLog.weight.trim().length === 0
@@ -308,40 +320,15 @@ function ExerciseLogger({
         })}
       </View>
 
-      {completedSetLogs.length ? (
-        <View style={styles.completedSetList}>
-          {completedSetLogs.map((setLog) => (
-            <View key={setLog.setNumber} style={styles.completedSetCard}>
-              <View style={styles.completedSetCopy}>
-                <Text style={styles.completedSetLabel}>Set {setLog.setNumber}</Text>
-                <Text style={styles.completedSetValue}>{formatSetDraftSummary(setLog)}</Text>
-              </View>
-
-              <Pressable
-                onPress={() =>
-                  onDraftChange({
-                    ...draft,
-                    setLogs: renumberSetLogs(
-                      draft.setLogs.filter((currentDraftSetLog) => currentDraftSetLog !== setLog)
-                    ),
-                  })
-                }
-                style={styles.completedSetRemoveButton}
-              >
-                <Text style={styles.completedSetRemoveButtonText}>Remove</Text>
-              </Pressable>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      {currentSetLog ? (
-        <View style={styles.setList}>
+      <View style={styles.setList}>
+        {draft.setLogs.map((setLog, index) => (
           <SetRow
-            setLog={currentSetLog}
+            key={setLog.setNumber}
+            setLog={setLog}
+            canRemove={draft.setLogs.length > 1}
             onChange={(nextSetLog) => {
-              const nextSetLogs = draft.setLogs.map((draftSetLog, index) =>
-                index === draft.setLogs.length - 1 ? nextSetLog : draftSetLog
+              const nextSetLogs = draft.setLogs.map((draftSetLog, draftIndex) =>
+                draftIndex === index ? nextSetLog : draftSetLog
               );
 
               onDraftChange({
@@ -349,9 +336,17 @@ function ExerciseLogger({
                 setLogs: nextSetLogs,
               });
             }}
+            onRemove={() =>
+              onDraftChange({
+                ...draft,
+                setLogs: renumberSetLogs(
+                  draft.setLogs.filter((_, draftIndex) => draftIndex !== index)
+                ),
+              })
+            }
           />
-        </View>
-      ) : null}
+        ))}
+      </View>
 
       {canAddAnotherSet || canRemoveEmptySet ? (
         <View style={styles.setActions}>
@@ -452,10 +447,14 @@ function MetaItem({
 
 function SetRow({
   setLog,
+  canRemove,
   onChange,
+  onRemove,
 }: {
   setLog: ExerciseSetDraft;
+  canRemove: boolean;
   onChange: (setLog: ExerciseSetDraft) => void;
+  onRemove: () => void;
 }) {
   return (
     <View style={styles.setRow}>
@@ -494,6 +493,12 @@ function SetRow({
           }
         />
       </View>
+
+      {canRemove ? (
+        <Pressable onPress={onRemove} style={styles.completedSetRemoveButton}>
+          <Text style={styles.completedSetRemoveButtonText}>Remove set</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -508,11 +513,6 @@ function createEmptySetDraft(setNumber: number): ExerciseSetDraft {
 
 function isStartedSet(setLog: ExerciseSetDraft) {
   return setLog.weight.trim().length > 0 || setLog.repsCompleted.trim().length > 0;
-}
-
-function formatSetDraftSummary(setLog: ExerciseSetDraft) {
-  const reps = setLog.repsCompleted.trim();
-  return reps.length > 0 ? `${reps} reps of ${setLog.weight} lb` : `${setLog.weight} lb`;
 }
 
 function renumberSetLogs(setLogs: ExerciseSetDraft[]) {
@@ -556,8 +556,18 @@ const styles = StyleSheet.create({
   header: {
     gap: 12,
   },
+  headerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  headerTopRowCompact: {
+    flexDirection: 'column',
+  },
   headerCopy: {
     gap: 6,
+    flex: 1,
   },
   headerBadges: {
     flexDirection: 'row',
@@ -619,10 +629,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
-  linkButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: theme.colors.accentSoft,
+  headerActions: {
+    alignItems: 'stretch',
+    gap: 10,
+    minWidth: 154,
+  },
+  headerActionsCompact: {
+    width: '100%',
+    minWidth: undefined,
+  },
+  playButton: {
+    backgroundColor: theme.colors.accent,
     borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  playButtonText: {
+    color: theme.colors.accentText,
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  linkButton: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.colors.borderStrong,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
@@ -630,10 +662,17 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   linkButtonText: {
-    color: theme.colors.accent,
+    color: theme.colors.link,
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  linkButtonLegacy: {
+    alignSelf: 'flex-start',
+    backgroundColor: theme.colors.accentSoft,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   optionsRow: {
     gap: 10,
@@ -867,34 +906,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
   },
-  completedSetList: {
-    gap: 10,
-  },
-  completedSetCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: 12,
-    gap: 10,
-  },
-  completedSetCopy: {
-    gap: 2,
-  },
-  completedSetLabel: {
-    color: theme.colors.muted,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  completedSetValue: {
-    color: theme.colors.text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
   completedSetRemoveButton: {
     alignSelf: 'flex-start',
+    backgroundColor: theme.colors.errorSurface,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   completedSetRemoveButtonText: {
     color: theme.colors.errorText,
@@ -905,6 +922,11 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   setRow: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radii.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    padding: 12,
     gap: 12,
   },
   setNumber: {
