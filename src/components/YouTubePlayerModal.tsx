@@ -5,6 +5,7 @@ import {
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -20,6 +21,7 @@ type YouTubePlayerModalProps = {
   visible: boolean;
   videoTitle: string;
   videoUrl: string | null;
+  videoNotes: string;
   onClose: () => void;
   onOpenInYouTube: () => void;
 };
@@ -28,10 +30,12 @@ export function YouTubePlayerModal({
   visible,
   videoTitle,
   videoUrl,
+  videoNotes,
   onClose,
   onOpenInYouTube,
 }: YouTubePlayerModalProps) {
   const embedUrl = videoUrl ? getYouTubeEmbedUrl(videoUrl) : null;
+  const notes = videoNotes.trim();
 
   return (
     <Modal
@@ -53,45 +57,56 @@ export function YouTubePlayerModal({
           </Pressable>
         </View>
 
-        <View style={styles.playerCard}>
-          {embedUrl ? (
-            Platform.OS === 'web' ? (
-              <View style={styles.webPlayerFrame}>
-                {renderWebIframe(embedUrl, videoTitle)}
-              </View>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.playerCard}>
+            {embedUrl ? (
+              Platform.OS === 'web' ? (
+                <View style={styles.webPlayerFrame}>
+                  {renderWebIframe(embedUrl, videoTitle)}
+                </View>
+              ) : (
+                <WebView
+                  style={styles.player}
+                  source={{
+                    html: createPlayerHtml(embedUrl, videoTitle),
+                    baseUrl: PLAYER_BASE_URL,
+                  }}
+                  allowsInlineMediaPlayback
+                  allowsFullscreenVideo
+                  mediaPlaybackRequiresUserAction={false}
+                  startInLoadingState
+                  renderLoading={() => (
+                    <View style={styles.loadingState}>
+                      <ActivityIndicator color={theme.colors.accent} size="large" />
+                    </View>
+                  )}
+                />
+              )
             ) : (
-              <WebView
-                style={styles.player}
-                source={{
-                  html: createPlayerHtml(embedUrl, videoTitle),
-                  baseUrl: PLAYER_BASE_URL,
-                }}
-                allowsInlineMediaPlayback
-                allowsFullscreenVideo
-                mediaPlaybackRequiresUserAction={false}
-                startInLoadingState
-                renderLoading={() => (
-                  <View style={styles.loadingState}>
-                    <ActivityIndicator color={theme.colors.accent} size="large" />
-                  </View>
-                )}
-              />
-            )
-          ) : (
-            <View style={styles.errorState}>
-              <Text style={styles.errorTitle}>Video unavailable in app</Text>
-              <Text style={styles.errorBody}>
-                This link is not a supported YouTube video URL, so it can only be opened in YouTube.
-              </Text>
-            </View>
-          )}
-        </View>
+              <View style={styles.errorState}>
+                <Text style={styles.errorTitle}>Video unavailable in app</Text>
+                <Text style={styles.errorBody}>
+                  This link is not a supported YouTube video URL, so it can only be opened in
+                  YouTube.
+                </Text>
 
-        <View style={styles.actionRow}>
-          <Pressable onPress={onOpenInYouTube} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Open in YouTube</Text>
-          </Pressable>
-        </View>
+                <Pressable onPress={onOpenInYouTube} style={styles.secondaryButton}>
+                  <Text style={styles.secondaryButtonText}>Open in YouTube</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+
+          {notes ? (
+            <View style={styles.notesCard}>
+              <Text style={styles.notesLabel}>Notes</Text>
+              <Text style={styles.notesBody}>{notes}</Text>
+            </View>
+          ) : null}
+        </ScrollView>
       </SafeAreaView>
     </Modal>
   );
@@ -167,7 +182,10 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
     paddingHorizontal: 16,
     paddingBottom: 20,
+  },
+  content: {
     gap: 16,
+    paddingBottom: 12,
   },
   header: {
     flexDirection: 'row',
@@ -175,6 +193,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
     paddingTop: 8,
+    paddingBottom: 16,
   },
   headerCopy: {
     flex: 1,
@@ -207,8 +226,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   playerCard: {
-    flex: 1,
-    minHeight: 280,
+    minHeight: 240,
+    aspectRatio: 16 / 9,
     backgroundColor: '#000000',
     borderRadius: theme.radii.lg,
     overflow: 'hidden',
@@ -233,7 +252,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
-    gap: 8,
+    gap: 12,
   },
   errorTitle: {
     color: theme.colors.accentText,
@@ -248,9 +267,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: 420,
   },
-  actionRow: {
-    gap: 10,
-  },
   secondaryButton: {
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radii.md,
@@ -264,5 +280,23 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  notesCard: {
+    backgroundColor: theme.colors.canvas,
+    borderRadius: theme.radii.md,
+    padding: 14,
+    gap: 4,
+  },
+  notesLabel: {
+    color: theme.colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  notesBody: {
+    color: theme.colors.text,
+    fontSize: 14,
+    lineHeight: 22,
   },
 });

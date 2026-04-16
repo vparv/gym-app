@@ -13,9 +13,9 @@ type ExerciseCardProps = {
   sessionLog?: ExerciseLog;
   isNextUp?: boolean;
   onDraftChange?: (draft: ExerciseLogDraft) => void;
-  onPlayVideo: (label: string, url: string) => void;
+  onPlayVideo: (label: string, url: string, notes: string) => void;
   onOpenUrl: (url: string) => void;
-  onStartLog?: () => void;
+  onStartLog?: (optionKey: string) => void;
   onSave?: () => void;
   onCancelEdit?: () => void;
   onEditLog?: () => void;
@@ -41,15 +41,81 @@ export function ExerciseCard({
 }: ExerciseCardProps) {
   const { width } = useWindowDimensions();
   const [metaGridWidth, setMetaGridWidth] = React.useState(0);
+  const [previewOptionKey, setPreviewOptionKey] = React.useState(
+    sessionLog?.performedOptionKey ?? draft?.selectedOptionKey ?? exercise.defaultOptionKey
+  );
   const isCompact = width < 390;
   const metaGridGap = 10;
   const useTwoColumnMeta = metaGridWidth > 0 ? metaGridWidth >= 260 : width >= 320;
   const metaCardWidth = useTwoColumnMeta && metaGridWidth > 0 ? (metaGridWidth - metaGridGap) / 2 : undefined;
-  const selectedOptionKey = draft?.selectedOptionKey ?? sessionLog?.performedOptionKey ?? exercise.defaultOptionKey;
+  const selectedOptionKey =
+    draft?.selectedOptionKey ?? sessionLog?.performedOptionKey ?? previewOptionKey;
   const selectedOption =
     exercise.options.find((option) => option.key === selectedOptionKey) ?? exercise.options[0];
   const historyLog = latestLog && latestLog.id !== sessionLog?.id ? latestLog : undefined;
   const isEditing = Boolean(draft);
+  const canPreviewOptions = !draft && !sessionLog;
+  const isCompactLoggedState = mode === 'active' && Boolean(sessionLog) && !isEditing;
+
+  React.useEffect(() => {
+    if (draft?.selectedOptionKey) {
+      setPreviewOptionKey(draft.selectedOptionKey);
+    }
+  }, [draft?.selectedOptionKey]);
+
+  React.useEffect(() => {
+    if (sessionLog?.performedOptionKey) {
+      setPreviewOptionKey(sessionLog.performedOptionKey);
+    }
+  }, [sessionLog?.performedOptionKey]);
+
+  if (isCompactLoggedState && sessionLog) {
+    const content = (
+      <>
+        <View style={styles.compactLoggedHeader}>
+          <View style={styles.compactLoggedCopy}>
+            <Text style={[styles.compactLoggedTitle, isCompact ? styles.compactLoggedTitleCompact : undefined]}>
+              {sessionLog.performedOptionLabel}
+            </Text>
+            <Text style={styles.compactLoggedSubtitle}>Tap to edit logged sets</Text>
+          </View>
+
+          <Text style={styles.loggedBadge}>Logged</Text>
+        </View>
+
+        <View style={styles.compactLoggedSetList}>
+          {sessionLog.setLogs.map((setLog) => (
+            <View key={setLog.setNumber} style={styles.compactLoggedSetRow}>
+              <Text style={styles.compactLoggedSetLabel}>Set {setLog.setNumber}</Text>
+              <Text style={styles.compactLoggedSetValue}>{formatCompactSetSummary(setLog)}</Text>
+            </View>
+          ))}
+        </View>
+      </>
+    );
+
+    if (onEditLog) {
+      return (
+        <Pressable
+          onPress={onEditLog}
+          style={({ pressed }) => [
+            styles.card,
+            styles.compactLoggedCard,
+            isCompact ? styles.cardCompact : undefined,
+            pressed ? styles.compactLoggedCardPressed : undefined,
+          ]}
+        >
+          {content}
+        </Pressable>
+      );
+    }
+
+    return (
+      <View style={[styles.card, styles.compactLoggedCard, isCompact ? styles.cardCompact : undefined]}>
+        {content}
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.card, isCompact ? styles.cardCompact : undefined]}>
@@ -77,7 +143,7 @@ export function ExerciseCard({
 
           <View style={[styles.headerActions, isCompact ? styles.headerActionsCompact : undefined]}>
             <Pressable
-              onPress={() => onPlayVideo(selectedOption.label, selectedOption.videoUrl)}
+              onPress={() => onPlayVideo(selectedOption.label, selectedOption.videoUrl, exercise.notes)}
               style={styles.playButton}
             >
               <Text style={styles.playButtonText}>Play video</Text>
@@ -98,8 +164,10 @@ export function ExerciseCard({
           const isSelected = option.key === selectedOption.key;
 
           return (
-            <View
+            <Pressable
               key={option.key}
+              disabled={!canPreviewOptions}
+              onPress={() => setPreviewOptionKey(option.key)}
               style={[styles.optionChip, isSelected ? styles.optionChipSelected : undefined]}
             >
               <Text style={[styles.optionLabel, isSelected ? styles.optionLabelSelected : undefined]}>
@@ -108,7 +176,7 @@ export function ExerciseCard({
               <Text style={[styles.optionValue, isSelected ? styles.optionValueSelected : undefined]}>
                 {option.label}
               </Text>
-            </View>
+            </Pressable>
           );
         })}
       </View>
@@ -232,7 +300,7 @@ export function ExerciseCard({
               ? 'This is the first exercise you have not logged in the current workout.'
               : 'You can log this exercise whenever you want in the session.'}
           </Text>
-          <Pressable onPress={onStartLog} style={styles.primaryActionButton}>
+          <Pressable onPress={() => onStartLog?.(selectedOption.key)} style={styles.primaryActionButton}>
             <Text style={styles.primaryActionButtonText}>Log this exercise</Text>
           </Pressable>
         </View>
@@ -272,10 +340,7 @@ function ExerciseLogger({
   const hasIncompleteStartedSet = draft.setLogs.some(
     (setLog) => isStartedSet(setLog) && setLog.weight.trim().length === 0
   );
-  const canAddAnotherSet =
-    Boolean(currentSetLog) &&
-    draft.setLogs.length < exercise.workingSets &&
-    currentSetLog.weight.trim().length > 0;
+  const canAddAnotherSet = Boolean(currentSetLog) && currentSetLog.weight.trim().length > 0;
   const canRemoveEmptySet =
     draft.setLogs.length > 1 &&
     currentSetLog.weight.trim().length === 0 &&
@@ -326,6 +391,7 @@ function ExerciseLogger({
             key={setLog.setNumber}
             setLog={setLog}
             canRemove={draft.setLogs.length > 1}
+            canDuplicate={isStartedSet(setLog)}
             onChange={(nextSetLog) => {
               const nextSetLogs = draft.setLogs.map((draftSetLog, draftIndex) =>
                 draftIndex === index ? nextSetLog : draftSetLog
@@ -344,6 +410,16 @@ function ExerciseLogger({
                 ),
               })
             }
+            onDuplicate={() =>
+              onDraftChange({
+                ...draft,
+                setLogs: renumberSetLogs([
+                  ...draft.setLogs.slice(0, index + 1),
+                  { ...setLog },
+                  ...draft.setLogs.slice(index + 1),
+                ]),
+              })
+            }
           />
         ))}
       </View>
@@ -360,10 +436,7 @@ function ExerciseLogger({
               }
               style={styles.addSetButton}
             >
-              <Text style={styles.addSetButtonText}>
-                Add set {draft.setLogs.length + 1}
-                {exercise.workingSets > 1 ? ` of ${exercise.workingSets}` : ''}
-              </Text>
+              <Text style={styles.addSetButtonText}>Add set {draft.setLogs.length + 1}</Text>
             </Pressable>
           ) : null}
 
@@ -448,57 +521,73 @@ function MetaItem({
 function SetRow({
   setLog,
   canRemove,
+  canDuplicate,
   onChange,
   onRemove,
+  onDuplicate,
 }: {
   setLog: ExerciseSetDraft;
   canRemove: boolean;
+  canDuplicate: boolean;
   onChange: (setLog: ExerciseSetDraft) => void;
   onRemove: () => void;
+  onDuplicate: () => void;
 }) {
   return (
     <View style={styles.setRow}>
-      <View style={styles.setNumber}>
-        <Text style={styles.setNumberText}>Set {setLog.setNumber}</Text>
+      <View style={styles.setRowHeader}>
+        <View style={styles.setNumber}>
+          <Text style={styles.setNumberText}>Set {setLog.setNumber}</Text>
+        </View>
+
+        <View style={styles.setRowActions}>
+          {canDuplicate ? (
+            <Pressable onPress={onDuplicate} style={styles.completedSetDuplicateButton}>
+              <Text style={styles.completedSetDuplicateButtonText}>Duplicate</Text>
+            </Pressable>
+          ) : null}
+
+          {canRemove ? (
+            <Pressable onPress={onRemove} style={styles.completedSetRemoveButton}>
+              <Text style={styles.completedSetRemoveButtonText}>Remove</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
-      <View style={styles.setField}>
-        <Text style={styles.inputLabel}>Reps</Text>
-        <TextInput
-          placeholder="Optional"
-          placeholderTextColor={theme.colors.muted}
-          style={styles.input}
-          value={setLog.repsCompleted}
-          onChangeText={(repsCompleted) =>
-            onChange({
-              ...setLog,
-              repsCompleted,
-            })
-          }
-        />
-      </View>
+      <View style={styles.setFieldsRow}>
+        <View style={styles.setFieldHalf}>
+          <Text style={styles.inputLabel}>Reps</Text>
+          <TextInput
+            placeholder="Optional"
+            placeholderTextColor={theme.colors.muted}
+            style={styles.input}
+            value={setLog.repsCompleted}
+            onChangeText={(repsCompleted) =>
+              onChange({
+                ...setLog,
+                repsCompleted,
+              })
+            }
+          />
+        </View>
 
-      <View style={styles.setField}>
-        <Text style={styles.inputLabel}>Weight</Text>
-        <TextInput
-          placeholder="Required"
-          placeholderTextColor={theme.colors.muted}
-          style={styles.input}
-          value={setLog.weight}
-          onChangeText={(weight) =>
-            onChange({
-              ...setLog,
-              weight,
-            })
-          }
-        />
+        <View style={styles.setFieldHalf}>
+          <Text style={styles.inputLabel}>Weight</Text>
+          <TextInput
+            placeholder="Required"
+            placeholderTextColor={theme.colors.muted}
+            style={styles.input}
+            value={setLog.weight}
+            onChangeText={(weight) =>
+              onChange({
+                ...setLog,
+                weight,
+              })
+            }
+          />
+        </View>
       </View>
-
-      {canRemove ? (
-        <Pressable onPress={onRemove} style={styles.completedSetRemoveButton}>
-          <Text style={styles.completedSetRemoveButtonText}>Remove set</Text>
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -540,6 +629,12 @@ function formatSetSummary(log: ExerciseLog) {
     .join(' · ');
 }
 
+function formatCompactSetSummary(setLog: ExerciseLog['setLogs'][number]) {
+  const reps = setLog.repsCompleted?.trim();
+
+  return reps?.length ? `${reps} reps · ${setLog.weight} lb` : `${setLog.weight} lb`;
+}
+
 const styles = StyleSheet.create({
   card: {
     backgroundColor: theme.colors.surface,
@@ -552,6 +647,64 @@ const styles = StyleSheet.create({
   cardCompact: {
     padding: 16,
     gap: 14,
+  },
+  compactLoggedCard: {
+    gap: 12,
+  },
+  compactLoggedCardPressed: {
+    opacity: 0.85,
+  },
+  compactLoggedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  compactLoggedCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  compactLoggedTitle: {
+    color: theme.colors.text,
+    fontSize: 22,
+    fontWeight: '800',
+    lineHeight: 28,
+  },
+  compactLoggedTitleCompact: {
+    fontSize: 19,
+    lineHeight: 24,
+  },
+  compactLoggedSubtitle: {
+    color: theme.colors.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  compactLoggedSetList: {
+    gap: 8,
+  },
+  compactLoggedSetRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: theme.colors.surfaceMuted,
+    borderRadius: theme.radii.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  compactLoggedSetLabel: {
+    color: theme.colors.muted,
+    fontSize: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  compactLoggedSetValue: {
+    flex: 1,
+    color: theme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'right',
   },
   header: {
     gap: 12,
@@ -913,6 +1066,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
+  completedSetDuplicateButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: theme.colors.accentSoft,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  completedSetDuplicateButtonText: {
+    color: theme.colors.accent,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   completedSetRemoveButtonText: {
     color: theme.colors.errorText,
     fontSize: 13,
@@ -929,6 +1094,18 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 12,
   },
+  setRowHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  setRowActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
   setNumber: {
     backgroundColor: theme.colors.badge,
     borderRadius: 999,
@@ -943,7 +1120,12 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  setField: {
+  setFieldsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  setFieldHalf: {
+    flex: 1,
     gap: 6,
   },
   inputLabel: {

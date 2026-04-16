@@ -3,8 +3,10 @@ import { StatusBar } from 'expo-status-bar';
 import * as DocumentPicker from 'expo-document-picker';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Linking,
   Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -93,9 +95,11 @@ export default function App() {
   const [videoPlayerState, setVideoPlayerState] = React.useState<{
     title: string;
     url: string | null;
+    notes: string;
   }>({
     title: '',
     url: null,
+    notes: '',
   });
 
   React.useEffect(() => {
@@ -391,10 +395,14 @@ export default function App() {
     });
   };
 
-  const handleStartLog = (exercise: PlannedExercise, existingLog?: ExerciseLog) => {
+  const handleStartLog = (
+    exercise: PlannedExercise,
+    existingLog?: ExerciseLog,
+    preferredOptionKey?: string
+  ) => {
     const nextDraft = existingLog
       ? createDraftFromLog(existingLog)
-      : createExerciseDraft(exercise, exercise.defaultOptionKey);
+      : createExerciseDraft(exercise, preferredOptionKey ?? exercise.defaultOptionKey);
 
     updateDraft(exercise.id, nextDraft);
     setMessage(null);
@@ -639,6 +647,41 @@ export default function App() {
     await completeWorkoutSession(currentDaySession);
   };
 
+  const cancelWorkoutSession = async () => {
+    if (!currentDaySession || !selectedDay) {
+      return;
+    }
+
+    if (currentDayLoggedCount === 0) {
+      await discardWorkoutSession(
+        currentDaySession,
+        `Canceled the ${selectedDay.name} workout before any exercises were logged.`
+      );
+      return;
+    }
+
+    setDialog({
+      title: 'Cancel workout?',
+      message: `This will delete the in-progress ${selectedDay.name} workout and remove the ${currentDayLoggedCount} exercise log${currentDayLoggedCount === 1 ? '' : 's'} already saved in it.`,
+      actions: [
+        {
+          label: 'Keep workout',
+          tone: 'secondary',
+          onPress: () => undefined,
+        },
+        {
+          label: 'Cancel workout',
+          tone: 'danger',
+          onPress: () =>
+            void discardWorkoutSession(
+              currentDaySession,
+              `Canceled the in-progress ${selectedDay.name} workout and removed its saved logs.`
+            ),
+        },
+      ],
+    });
+  };
+
   const completeWorkoutSession = async (session: WorkoutSession) => {
     setSessionBusy(true);
 
@@ -818,10 +861,11 @@ export default function App() {
     }
   };
 
-  const handlePlayVideo = (label: string, url: string) => {
+  const handlePlayVideo = (label: string, url: string, notes: string) => {
     setVideoPlayerState({
       title: label,
       url,
+      notes,
     });
   };
 
@@ -894,18 +938,30 @@ export default function App() {
                 ? `Up next: ${nextExercise.options[0]?.label ?? 'Next exercise'}`
                 : 'Everything in this workout has a log. Finish when you are ready.'}
             </Text>
-            <Pressable
-              disabled={sessionBusy || currentDayLoggedCount === 0}
-              onPress={() => void finishWorkoutSession()}
-              style={[
-                styles.primaryButton,
-                (sessionBusy || currentDayLoggedCount === 0) ? styles.buttonDisabled : undefined,
-              ]}
-            >
-              <Text style={styles.primaryButtonText}>Finish Workout</Text>
-            </Pressable>
+            <View style={styles.actionsRow}>
+              <Pressable
+                disabled={sessionBusy || currentDayLoggedCount === 0}
+                onPress={() => void finishWorkoutSession()}
+                style={[
+                  styles.primaryButton,
+                  (sessionBusy || currentDayLoggedCount === 0) ? styles.buttonDisabled : undefined,
+                ]}
+              >
+                <Text style={styles.primaryButtonText}>Finish Workout</Text>
+              </Pressable>
+
+              <Pressable
+                disabled={sessionBusy}
+                onPress={() => void cancelWorkoutSession()}
+                style={[styles.secondaryButton, sessionBusy ? styles.buttonDisabled : undefined]}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel Workout</Text>
+              </Pressable>
+            </View>
             {currentDayLoggedCount === 0 ? (
-              <Text style={styles.inlineHint}>Log at least one exercise before finishing.</Text>
+              <Text style={styles.inlineHint}>
+                Log at least one exercise before finishing, or cancel this workout to delete it.
+              </Text>
             ) : null}
           </View>
         ) : null}
@@ -978,244 +1034,247 @@ export default function App() {
     <SafeAreaView style={styles.app}>
       <StatusBar style="dark" />
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={[styles.page, isCompact ? styles.pageCompact : undefined]}>
-          {viewState.screen === 'home' ? (
-            <>
-              <View style={[styles.heroCard, isCompact ? styles.surfaceCompact : undefined]}>
-                <View style={styles.heroCopy}>
-                  <Text style={styles.heroBadge}>Program</Text>
-                  <Text style={[styles.heroTitle, isCompact ? styles.heroTitleCompact : undefined]}>
-                    Guided workout tracker
-                  </Text>
-                  <Text style={styles.heroBody}>
-                    Pick a day, run the workout in any order you want, and finish only when you are
-                    done. The app keeps your latest weights, completed dates, and what is next.
-                  </Text>
-                </View>
-
-                <View style={styles.heroMetaCard}>
-                  <Text style={styles.heroMetaLabel}>Current block</Text>
-                  <Text style={styles.heroMetaValue}>{activeWeek.block}</Text>
-                  <Text style={styles.heroMetaHint}>
-                    {activeWeek.days.length} workout days in week {activeWeek.weekNumber}
-                  </Text>
-                  <Text style={[styles.heroMetaSync, styles.heroMetaSyncOnline]}>
-                    Storage: Supabase only
-                  </Text>
-                </View>
-              </View>
-
-              {message ? <MessageBanner message={message} /> : null}
-
-              <View style={[styles.panel, isCompact ? styles.surfaceCompact : undefined]}>
-                <View style={styles.panelHeader}>
-                  <Text style={styles.panelTitle}>Choose your week</Text>
-                  <Text style={styles.panelSubtitle}>
-                    Your current week is saved automatically. You can change it whenever you need.
-                  </Text>
-                </View>
-
-                <WeekPicker
-                  weeks={program.weeks.map((week) => ({
-                    weekNumber: week.weekNumber,
-                    block: week.block,
-                  }))}
-                  activeWeek={program.activeWeek}
-                  onSelectWeek={(weekNumber) => void handleWeekSelect(weekNumber)}
-                />
-              </View>
-
-              <View style={[styles.panel, isCompact ? styles.surfaceCompact : undefined]}>
-                <View style={styles.panelHeader}>
-                  <Text style={styles.panelTitle}>Next up</Text>
-                  {activeSession && currentWorkoutDay ? (
-                    <Text style={styles.panelSubtitle}>
-                      Workout in progress: Week {activeSession.weekNumber} {currentWorkoutDay.name}.
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.keyboardAvoider}
+      >
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={[styles.page, isCompact ? styles.pageCompact : undefined]}>
+            {viewState.screen === 'home' ? (
+              <>
+                <View style={[styles.heroCard, isCompact ? styles.surfaceCompact : undefined]}>
+                  <View style={styles.heroMetaCard}>
+                    <Text style={styles.heroMetaLabel}>Current block</Text>
+                    <Text style={styles.heroMetaValue}>{activeWeek.block}</Text>
+                    <Text style={styles.heroMetaHint}>
+                      {activeWeek.days.length} workout days in week {activeWeek.weekNumber}
                     </Text>
-                  ) : nextUpDay ? (
-                    <Text style={styles.panelSubtitle}>
-                      Suggested next day: {nextUpDay.name}. You can still pick any day you want.
-                    </Text>
-                  ) : (
-                    <Text style={styles.panelSubtitle}>This week is complete.</Text>
-                  )}
+                  </View>
                 </View>
 
-                <View style={styles.nextUpCard}>
-                  {activeSession && currentWorkoutDay ? (
-                    <>
-                      <Text style={styles.nextUpTitle}>
-                        Resume {currentWorkoutDay.name}
-                      </Text>
-                      <Text style={styles.nextUpBody}>
-                        Started {formatSessionDateTime(activeSession.startedAt)}.
-                      </Text>
-                      <Pressable onPress={() => void openDayScreen(currentWorkoutDay)} style={styles.primaryButton}>
-                        <Text style={styles.primaryButtonText}>Open Current Workout</Text>
-                      </Pressable>
-                    </>
-                  ) : nextUpDay ? (
-                    <>
-                      <Text style={styles.nextUpTitle}>{nextUpDay.name}</Text>
-                      <Text style={styles.nextUpBody}>{nextUpDay.focus}</Text>
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.nextUpTitle}>Week complete</Text>
-                      <Text style={styles.nextUpBody}>
-                        Every day in this week has a completed workout session.
-                      </Text>
-                    </>
-                  )}
-                </View>
-              </View>
+                {message ? <MessageBanner message={message} /> : null}
 
-              <View style={[styles.panel, isCompact ? styles.surfaceCompact : undefined]}>
-                <View style={styles.panelHeader}>
-                  <Text style={styles.panelTitle}>Workout days</Text>
-                  <Text style={styles.panelSubtitle}>
-                    Tap any day to review it. Completed days show the latest finish date.
-                  </Text>
-                </View>
-
-                <DayList items={dayItems} onSelectDay={handleOpenDay} />
-              </View>
-
-              <View style={[styles.panel, isCompact ? styles.surfaceCompact : undefined]}>
-                <View style={styles.panelHeader}>
-                  <Text style={styles.panelTitle}>Program management</Text>
-                  <Text style={styles.panelSubtitle}>
-                    Replace the workout CSV or clear your saved progress without deleting the plan.
-                  </Text>
-                </View>
-
-                <View style={styles.actionsRow}>
-                  <Pressable
-                    disabled={busyAction !== null}
-                    onPress={() => void handleReplaceProgram()}
-                    style={[
-                      styles.primaryButton,
-                      busyAction !== null ? styles.buttonDisabled : undefined,
-                    ]}
-                  >
-                    <Text style={styles.primaryButtonText}>
-                      {busyAction === 'replace' ? 'Replacing program...' : 'Replace Program'}
-                    </Text>
-                  </Pressable>
-
-                  <Pressable
-                    disabled={busyAction !== null}
-                    onPress={handleClearLogs}
-                    style={[
-                      styles.secondaryButton,
-                      busyAction !== null ? styles.buttonDisabled : undefined,
-                    ]}
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      {busyAction === 'clear-logs' ? 'Clearing progress...' : 'Clear Logs'}
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            </>
-          ) : selectedDay ? (
-            <>
-              <View style={styles.detailHeader}>
-                <Pressable style={styles.backButton} onPress={handleBackToProgram}>
-                  <Text style={styles.backButtonText}>Back to Week</Text>
-                </Pressable>
-              </View>
-
-              {message ? <MessageBanner message={message} /> : null}
-
-              {renderDetailHeaderCard()}
-
-              {selectedDayRecentSessions.length ? (
                 <View style={[styles.panel, isCompact ? styles.surfaceCompact : undefined]}>
                   <View style={styles.panelHeader}>
-                    <Text style={styles.panelTitle}>Recent sessions</Text>
+                    <Text style={styles.panelTitle}>Choose your week</Text>
                     <Text style={styles.panelSubtitle}>
-                      The latest completed workouts for this exact day.
+                      Your current week is saved automatically. You can change it whenever you need.
                     </Text>
                   </View>
 
-                  <View style={styles.sessionHistoryList}>
-                    {selectedDayRecentSessions.map((session) => (
-                      <View key={session.id} style={styles.sessionHistoryCard}>
-                        <Text style={styles.sessionHistoryTitle}>
-                          {formatSessionDate(session.completedAt ?? session.startedAt)}
+                  <WeekPicker
+                    weeks={program.weeks.map((week) => ({
+                      weekNumber: week.weekNumber,
+                      block: week.block,
+                    }))}
+                    activeWeek={program.activeWeek}
+                    onSelectWeek={(weekNumber) => void handleWeekSelect(weekNumber)}
+                  />
+                </View>
+
+                <View style={[styles.panel, isCompact ? styles.surfaceCompact : undefined]}>
+                  <View style={styles.panelHeader}>
+                    <Text style={styles.panelTitle}>Next up</Text>
+                    {activeSession && currentWorkoutDay ? (
+                      <Text style={styles.panelSubtitle}>
+                        Workout in progress: Week {activeSession.weekNumber} {currentWorkoutDay.name}.
+                      </Text>
+                    ) : nextUpDay ? (
+                      <Text style={styles.panelSubtitle}>
+                        Suggested next day: {nextUpDay.name}. You can still pick any day you want.
+                      </Text>
+                    ) : (
+                      <Text style={styles.panelSubtitle}>This week is complete.</Text>
+                    )}
+                  </View>
+
+                  <View style={styles.nextUpCard}>
+                    {activeSession && currentWorkoutDay ? (
+                      <>
+                        <Text style={styles.nextUpTitle}>
+                          Resume {currentWorkoutDay.name}
                         </Text>
-                        <Text style={styles.sessionHistoryBody}>
-                          {countLoggedExercisesInSession(session.id, logs)} exercises logged
+                        <Text style={styles.nextUpBody}>
+                          Started {formatSessionDateTime(activeSession.startedAt)}.
                         </Text>
-                      </View>
-                    ))}
+                        <Pressable onPress={() => void openDayScreen(currentWorkoutDay)} style={styles.primaryButton}>
+                          <Text style={styles.primaryButtonText}>Open Current Workout</Text>
+                        </Pressable>
+                      </>
+                    ) : nextUpDay ? (
+                      <>
+                        <Text style={styles.nextUpTitle}>{nextUpDay.name}</Text>
+                        <Text style={styles.nextUpBody}>{nextUpDay.focus}</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.nextUpTitle}>Week complete</Text>
+                        <Text style={styles.nextUpBody}>
+                          Every day in this week has a completed workout session.
+                        </Text>
+                      </>
+                    )}
                   </View>
                 </View>
-              ) : null}
 
-              <View style={styles.exerciseList}>
-                {selectedDay.exercises.map((exercise) => {
-                  const sessionForCard = currentDaySession ?? justCompletedSession;
-                  const sessionLog = sessionForCard
-                    ? getSessionLogByExerciseId(sessionForCard.id, exercise.id, logs)
-                    : undefined;
-                  const draft = drafts[exercise.id];
-                  const selectedOptionKey =
-                    draft?.selectedOptionKey ??
-                    sessionLog?.performedOptionKey ??
-                    exercise.defaultOptionKey;
-                  const selectedOption =
-                    getExerciseOption(exercise, selectedOptionKey) ?? exercise.options[0];
-                  const latestLog = latestLogsByHistoryKey.get(selectedOption.historyKey);
+                <View style={[styles.panel, isCompact ? styles.surfaceCompact : undefined]}>
+                  <View style={styles.panelHeader}>
+                    <Text style={styles.panelTitle}>Workout days</Text>
+                    <Text style={styles.panelSubtitle}>
+                      Tap any day to review it. Completed days show the latest finish date.
+                    </Text>
+                  </View>
 
-                  return (
-                    <ExerciseCard
-                      key={exercise.id}
-                      exercise={exercise}
-                      focus={selectedDay.focus}
-                      mode={detailMode ?? 'review'}
-                      draft={draft}
-                      latestLog={latestLog}
-                      sessionLog={sessionLog}
-                      isNextUp={detailMode === 'active' && nextExercise?.id === exercise.id}
-                      onDraftChange={(nextDraft) => updateDraft(exercise.id, nextDraft)}
-                      onPlayVideo={handlePlayVideo}
-                      onOpenUrl={handleOpenUrl}
-                      onStartLog={() => handleStartLog(exercise, sessionLog)}
-                      onSave={() => void saveExerciseLog(exercise, draft ?? createExerciseDraft(exercise, exercise.defaultOptionKey))}
-                      onCancelEdit={() => handleCancelEdit(exercise.id)}
-                      onEditLog={() => sessionLog && handleStartLog(exercise, sessionLog)}
-                      onRemoveLog={() =>
-                        sessionLog
-                          ? setDialog({
-                              title: 'Remove this exercise log?',
-                              message:
-                                'This removes the exercise from the current workout session. You can log it again any time before you finish.',
-                              actions: [
-                                {
-                                  label: 'Cancel',
-                                  tone: 'secondary',
-                                  onPress: () => undefined,
-                                },
-                                {
-                                  label: 'Remove log',
-                                  tone: 'danger',
-                                  onPress: () => void removeSessionLog(sessionLog),
-                                },
-                              ],
-                            })
-                          : undefined
-                      }
-                    />
-                  );
-                })}
-              </View>
-            </>
-          ) : null}
-        </View>
-      </ScrollView>
+                  <DayList items={dayItems} onSelectDay={handleOpenDay} />
+                </View>
+
+                <View style={[styles.panel, isCompact ? styles.surfaceCompact : undefined]}>
+                  <View style={styles.panelHeader}>
+                    <Text style={styles.panelTitle}>Program management</Text>
+                    <Text style={styles.panelSubtitle}>
+                      Replace the workout CSV or clear your saved progress without deleting the plan.
+                    </Text>
+                  </View>
+
+                  <View style={styles.actionsRow}>
+                    <Pressable
+                      disabled={busyAction !== null}
+                      onPress={() => void handleReplaceProgram()}
+                      style={[
+                        styles.primaryButton,
+                        busyAction !== null ? styles.buttonDisabled : undefined,
+                      ]}
+                    >
+                      <Text style={styles.primaryButtonText}>
+                        {busyAction === 'replace' ? 'Replacing program...' : 'Replace Program'}
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      disabled={busyAction !== null}
+                      onPress={handleClearLogs}
+                      style={[
+                        styles.secondaryButton,
+                        busyAction !== null ? styles.buttonDisabled : undefined,
+                      ]}
+                    >
+                      <Text style={styles.secondaryButtonText}>
+                        {busyAction === 'clear-logs' ? 'Clearing progress...' : 'Clear Logs'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </>
+            ) : selectedDay ? (
+              <>
+                <View style={styles.detailHeader}>
+                  <Pressable style={styles.backButton} onPress={handleBackToProgram}>
+                    <Text style={styles.backButtonText}>Back to Week</Text>
+                  </Pressable>
+                </View>
+
+                {message ? <MessageBanner message={message} /> : null}
+
+                {renderDetailHeaderCard()}
+
+                {selectedDayRecentSessions.length ? (
+                  <View style={[styles.panel, isCompact ? styles.surfaceCompact : undefined]}>
+                    <View style={styles.panelHeader}>
+                      <Text style={styles.panelTitle}>Recent sessions</Text>
+                      <Text style={styles.panelSubtitle}>
+                        The latest completed workouts for this exact day.
+                      </Text>
+                    </View>
+
+                    <View style={styles.sessionHistoryList}>
+                      {selectedDayRecentSessions.map((session) => (
+                        <View key={session.id} style={styles.sessionHistoryCard}>
+                          <Text style={styles.sessionHistoryTitle}>
+                            {formatSessionDate(session.completedAt ?? session.startedAt)}
+                          </Text>
+                          <Text style={styles.sessionHistoryBody}>
+                            {countLoggedExercisesInSession(session.id, logs)} exercises logged
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+
+                <View style={styles.exerciseList}>
+                  {selectedDay.exercises.map((exercise) => {
+                    const sessionForCard = currentDaySession ?? justCompletedSession;
+                    const sessionLog = sessionForCard
+                      ? getSessionLogByExerciseId(sessionForCard.id, exercise.id, logs)
+                      : undefined;
+                    const draft = drafts[exercise.id];
+                    const selectedOptionKey =
+                      draft?.selectedOptionKey ??
+                      sessionLog?.performedOptionKey ??
+                      exercise.defaultOptionKey;
+                    const selectedOption =
+                      getExerciseOption(exercise, selectedOptionKey) ?? exercise.options[0];
+                    const latestLog = latestLogsByHistoryKey.get(selectedOption.historyKey);
+
+                    return (
+                      <ExerciseCard
+                        key={exercise.id}
+                        exercise={exercise}
+                        focus={selectedDay.focus}
+                        mode={detailMode ?? 'review'}
+                        draft={draft}
+                        latestLog={latestLog}
+                        sessionLog={sessionLog}
+                        isNextUp={detailMode === 'active' && nextExercise?.id === exercise.id}
+                        onDraftChange={(nextDraft) => updateDraft(exercise.id, nextDraft)}
+                        onPlayVideo={handlePlayVideo}
+                        onOpenUrl={handleOpenUrl}
+                        onStartLog={(preferredOptionKey) =>
+                          handleStartLog(exercise, sessionLog, preferredOptionKey)
+                        }
+                        onSave={() =>
+                          void saveExerciseLog(
+                            exercise,
+                            draft ?? createExerciseDraft(exercise, exercise.defaultOptionKey)
+                          )
+                        }
+                        onCancelEdit={() => handleCancelEdit(exercise.id)}
+                        onEditLog={() => sessionLog && handleStartLog(exercise, sessionLog)}
+                        onRemoveLog={() =>
+                          sessionLog
+                            ? setDialog({
+                                title: 'Remove this exercise log?',
+                                message:
+                                  'This removes the exercise from the current workout session. You can log it again any time before you finish.',
+                                actions: [
+                                  {
+                                    label: 'Cancel',
+                                    tone: 'secondary',
+                                    onPress: () => undefined,
+                                  },
+                                  {
+                                    label: 'Remove log',
+                                    tone: 'danger',
+                                    onPress: () => void removeSessionLog(sessionLog),
+                                  },
+                                ],
+                              })
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
+                </View>
+              </>
+            ) : null}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <ActionDialog
         dialog={dialog}
@@ -1227,10 +1286,12 @@ export default function App() {
         visible={Boolean(videoPlayerState.url)}
         videoTitle={videoPlayerState.title}
         videoUrl={videoPlayerState.url}
+        videoNotes={videoPlayerState.notes}
         onClose={() =>
           setVideoPlayerState({
             title: '',
             url: null,
+            notes: '',
           })
         }
         onOpenInYouTube={() =>
@@ -1442,8 +1503,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
+  keyboardAvoider: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  scrollView: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
   scrollContent: {
     flexGrow: 1,
+    backgroundColor: theme.colors.background,
   },
   page: {
     width: '100%',
@@ -1491,41 +1561,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border,
     padding: 24,
-    gap: 18,
   },
   surfaceCompact: {
     padding: 16,
-  },
-  heroCopy: {
-    gap: 10,
-  },
-  heroBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: theme.colors.badge,
-    color: theme.colors.badgeText,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-  },
-  heroTitle: {
-    color: theme.colors.text,
-    fontSize: 34,
-    fontWeight: '800',
-    lineHeight: 40,
-  },
-  heroTitleCompact: {
-    fontSize: 28,
-    lineHeight: 34,
-  },
-  heroBody: {
-    color: theme.colors.muted,
-    fontSize: 16,
-    lineHeight: 24,
-    maxWidth: 760,
   },
   heroMetaCard: {
     backgroundColor: theme.colors.canvas,
@@ -1549,19 +1587,6 @@ const styles = StyleSheet.create({
     color: theme.colors.muted,
     fontSize: 14,
     lineHeight: 22,
-  },
-  heroMetaSync: {
-    marginTop: 8,
-    fontSize: 13,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  heroMetaSyncOnline: {
-    color: theme.colors.accent,
-  },
-  heroMetaSyncOffline: {
-    color: theme.colors.warning,
   },
   panel: {
     backgroundColor: theme.colors.surface,
