@@ -1,11 +1,13 @@
 # nippard-plan
 
-Expo gym app for iOS and web with Supabase-backed sync and a local cache fallback.
+Expo gym app for iOS and web with Supabase-backed persistence.
 
 ## Commands
 
 ```bash
 npm install
+npm run build
+npm run build:web
 npm run web
 npm run ios
 npm run typecheck
@@ -42,8 +44,8 @@ Current remote storage shape:
 ## App behavior
 
 - Seeds the corrected bodybuilding transformation CSV on first launch.
-- Reads and writes the active week and workout logs through Supabase when configured.
-- Keeps a local cache so the last synced data still loads if Supabase is temporarily unavailable.
+- Reads and writes the active week, workout sessions, and exercise logs through Supabase only.
+- Requires Supabase configuration and connectivity to load or mutate app data.
 - Lets you replace the program CSV later from inside the app.
 - Keeps history per performed movement variation, not just per workout slot.
 
@@ -64,3 +66,7 @@ Current remote storage shape:
 ## Verification
 
 Run `npm run typecheck`, `npm run test`, and `npm run build:web` before shipping changes.
+
+## Vercel deployment
+
+This app is an Expo project that exports a static web bundle. For Vercel, the repo now includes `vercel.json` so Vercel runs `expo export -p web` and serves the generated `dist/` directory instead of trying to infer the app layout from the source tree.

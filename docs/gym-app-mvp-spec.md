@@ -207,7 +207,7 @@ This keeps the tracking useful without turning the app into a full workout logge
 
 ## Data model
 
-Use plain TypeScript objects persisted in AsyncStorage. That is enough for this app size and works for iOS and web.
+Use plain TypeScript objects in the app layer, persisted through Supabase as the single source of truth for iOS and web.
 
 ### Imported program data
 
@@ -446,7 +446,7 @@ Use built-in `Linking` for opening video URLs.
 - `src/lib/csv.ts`
   - exact-schema CSV parsing and normalization
 - `src/lib/storage.ts`
-  - AsyncStorage helpers
+  - Supabase persistence helpers
 - `src/components/ImportProgram.tsx`
   - import action and error display
 - `src/components/WeekPicker.tsx`

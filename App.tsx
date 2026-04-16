@@ -86,7 +86,7 @@ export default function App() {
   const [drafts, setDrafts] = React.useState<Record<string, ExerciseLogDraft>>({});
   const [message, setMessage] = React.useState<AppMessage | null>(null);
   const [busyAction, setBusyAction] = React.useState<'replace' | 'clear-logs' | null>(null);
-  const [storageMode, setStorageMode] = React.useState<'supabase' | 'local-cache'>('local-cache');
+  const [storageMode, setStorageMode] = React.useState<'supabase'>('supabase');
   const [sessionBusy, setSessionBusy] = React.useState(false);
   const [dialog, setDialog] = React.useState<DialogState | null>(null);
   const [justCompletedSessionId, setJustCompletedSessionId] = React.useState<string | null>(null);
@@ -1000,15 +1000,8 @@ export default function App() {
                   <Text style={styles.heroMetaHint}>
                     {activeWeek.days.length} workout days in week {activeWeek.weekNumber}
                   </Text>
-                  <Text
-                    style={[
-                      styles.heroMetaSync,
-                      storageMode === 'supabase'
-                        ? styles.heroMetaSyncOnline
-                        : styles.heroMetaSyncOffline,
-                    ]}
-                  >
-                    {storageMode === 'supabase' ? 'Sync: Supabase' : 'Sync: Local cache'}
+                  <Text style={[styles.heroMetaSync, styles.heroMetaSyncOnline]}>
+                    Storage: Supabase only
                   </Text>
                 </View>
               </View>

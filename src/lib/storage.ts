@@ -1,5 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import type {
   ExerciseLog,
   SetLog,
@@ -10,10 +8,6 @@ import type {
 } from '../types';
 import { getSupabaseClient, isSupabaseConfigured } from './supabase';
 
-export const PROGRAM_STORAGE_KEY = 'gym-program:v1';
-export const LOG_STORAGE_KEY = 'gym-logs:v1';
-export const SESSION_STORAGE_KEY = 'gym-sessions:v1';
-
 const REMOTE_SCOPE_ID = 'default';
 const PROGRAM_TABLE = 'gym_program_state';
 const LOG_TABLE = 'gym_exercise_logs';
@@ -23,12 +17,12 @@ export type AppDataLoadResult = {
   program: WorkoutProgram | null;
   logs: ExerciseLog[];
   sessions: WorkoutSession[];
-  mode: 'supabase' | 'local-cache';
+  mode: 'supabase';
   notice?: string;
 };
 
 export type StorageMutationResult = {
-  mode: 'supabase' | 'local-cache';
+  mode: 'supabase';
   notice?: string;
 };
 
@@ -63,505 +57,218 @@ type RemoteSessionRow = {
 };
 
 export async function loadAppData(): Promise<AppDataLoadResult> {
-  const [rawLocalProgram, rawLocalLogs, rawLocalSessions] = await Promise.all([
-    loadLocalProgram(),
-    loadLocalLogs(),
-    loadLocalSessions(),
+  assertSupabaseConfigured();
+
+  const supabase = getSupabaseClient();
+  const [programResult, logsResult, sessionsResult] = await Promise.all([
+    supabase
+      .from(PROGRAM_TABLE)
+      .select('program')
+      .eq('scope_id', REMOTE_SCOPE_ID)
+      .maybeSingle<RemoteProgramRow>(),
+    supabase
+      .from(LOG_TABLE)
+      .select(
+        'id, program_exercise_id, day_id, session_id, performed_option_key, performed_option_label, history_key, week_number, day_name, logged_at, exercise_note, set_logs'
+      )
+      .eq('scope_id', REMOTE_SCOPE_ID)
+      .order('logged_at', { ascending: true })
+      .returns<RemoteLogRow[]>(),
+    supabase
+      .from(SESSION_TABLE)
+      .select('id, day_id, day_name, week_number, status, started_at, completed_at, created_at')
+      .eq('scope_id', REMOTE_SCOPE_ID)
+      .order('created_at', { ascending: true })
+      .returns<RemoteSessionRow[]>(),
   ]);
 
-  const localProgram = isValidWorkoutProgram(rawLocalProgram) ? rawLocalProgram : null;
-  const localLogs = Array.isArray(rawLocalLogs) ? rawLocalLogs : [];
-  const localSessions = Array.isArray(rawLocalSessions)
-    ? rawLocalSessions.filter(isValidWorkoutSession)
-    : [];
-  const localProgramWasInvalid = rawLocalProgram !== null && !localProgram;
-  const localSessionsWereInvalid =
-    Array.isArray(rawLocalSessions) && rawLocalSessions.length !== localSessions.length;
-  const localNotices = [
-    localProgramWasInvalid ? 'The saved local workout program was invalid and was ignored.' : undefined,
-    localSessionsWereInvalid ? 'Some saved local workout sessions were invalid and were ignored.' : undefined,
-  ]
-    .filter(Boolean)
-    .join(' ');
-
-  if (!isSupabaseConfigured()) {
-    return {
-      program: localProgram,
-      logs: localLogs,
-      sessions: localSessions,
-      mode: 'local-cache',
-      notice:
-        localNotices ||
-        'Supabase is not configured yet, so the app is using local storage only.',
-    };
+  if (programResult.error) {
+    throw new Error(`Supabase could not load the workout program. ${programResult.error.message}`);
   }
 
-  try {
-    const supabase = getSupabaseClient();
-    const [programResult, logsResult, sessionsResult] = await Promise.all([
-      supabase
-        .from(PROGRAM_TABLE)
-        .select('program')
-        .eq('scope_id', REMOTE_SCOPE_ID)
-        .maybeSingle<RemoteProgramRow>(),
-      supabase
-        .from(LOG_TABLE)
-        .select(
-          'id, program_exercise_id, day_id, session_id, performed_option_key, performed_option_label, history_key, week_number, day_name, logged_at, exercise_note, set_logs'
-        )
-        .eq('scope_id', REMOTE_SCOPE_ID)
-        .order('logged_at', { ascending: true })
-        .returns<RemoteLogRow[]>(),
-      supabase
-        .from(SESSION_TABLE)
-        .select('id, day_id, day_name, week_number, status, started_at, completed_at, created_at')
-        .eq('scope_id', REMOTE_SCOPE_ID)
-        .order('created_at', { ascending: true })
-        .returns<RemoteSessionRow[]>(),
-    ]);
-
-    if (programResult.error) {
-      throw programResult.error;
-    }
-
-    if (logsResult.error) {
-      throw logsResult.error;
-    }
-
-    if (sessionsResult.error) {
-      throw sessionsResult.error;
-    }
-
-    const rawRemoteProgram = programResult.data?.program ?? null;
-    const remoteProgram = isValidWorkoutProgram(rawRemoteProgram) ? rawRemoteProgram : null;
-    const remoteLogs = (logsResult.data ?? []).map(mapRemoteLogRow);
-    const remoteSessions = (sessionsResult.data ?? [])
-      .map(mapRemoteSessionRow)
-      .filter(isValidWorkoutSession);
-    const remoteProgramWasInvalid = rawRemoteProgram !== null && !remoteProgram;
-    const remoteSessionsWereInvalid =
-      (sessionsResult.data?.length ?? 0) !== remoteSessions.length;
-
-    if (remoteProgram) {
-      await saveLocalSnapshot(remoteProgram, remoteLogs, remoteSessions);
-
-      return {
-        program: remoteProgram,
-        logs: remoteLogs,
-        sessions: remoteSessions,
-        mode: 'supabase',
-        notice:
-          [
-            localNotices || undefined,
-            remoteSessionsWereInvalid
-              ? 'Some Supabase workout sessions were invalid and were ignored.'
-              : undefined,
-          ]
-            .filter(Boolean)
-            .join(' ') || undefined,
-      };
-    }
-
-    if (localProgram) {
-      await writeRemoteSnapshot(localProgram, localLogs, localSessions);
-      await saveLocalSnapshot(localProgram, localLogs, localSessions);
-
-      return {
-        program: localProgram,
-        logs: localLogs,
-        sessions: localSessions,
-        mode: 'supabase',
-        notice: [
-          localNotices || undefined,
-          remoteProgramWasInvalid
-            ? 'Supabase had invalid workout data, so the local cache was used to repair it.'
-            : undefined,
-          'Migrated your existing local workout data into Supabase.',
-        ]
-          .filter(Boolean)
-          .join(' '),
-      };
-    }
-
-    return {
-      program: null,
-      logs: [],
-      sessions: [],
-      mode: 'local-cache',
-      notice:
-        [
-          localNotices || undefined,
-          remoteProgramWasInvalid ? 'Supabase returned invalid workout data.' : undefined,
-          remoteSessionsWereInvalid
-            ? 'Some Supabase workout sessions were invalid and were ignored.'
-            : undefined,
-        ]
-          .filter(Boolean)
-          .join(' ') || undefined,
-    };
-  } catch (error) {
-    return {
-      program: localProgram,
-      logs: localLogs,
-      sessions: localSessions,
-      mode: 'local-cache',
-      notice: [
-        localNotices || undefined,
-        `Could not reach Supabase. ${getErrorMessage(error)}`,
-        localProgram ? 'Using the local cache instead.' : undefined,
-      ]
-        .filter(Boolean)
-        .join(' '),
-    };
+  if (logsResult.error) {
+    throw new Error(`Supabase could not load workout logs. ${logsResult.error.message}`);
   }
+
+  if (sessionsResult.error) {
+    throw new Error(`Supabase could not load workout sessions. ${sessionsResult.error.message}`);
+  }
+
+  const rawRemoteProgram = programResult.data?.program ?? null;
+  const remoteProgram = isValidWorkoutProgram(rawRemoteProgram) ? rawRemoteProgram : null;
+
+  if (rawRemoteProgram && !remoteProgram) {
+    throw new Error('Supabase returned invalid workout program data.');
+  }
+
+  const remoteSessions = (sessionsResult.data ?? [])
+    .map(mapRemoteSessionRow)
+    .filter(isValidWorkoutSession);
+  const invalidSessionCount = (sessionsResult.data?.length ?? 0) - remoteSessions.length;
+
+  return {
+    program: remoteProgram,
+    logs: (logsResult.data ?? []).map(mapRemoteLogRow),
+    sessions: remoteSessions,
+    mode: 'supabase',
+    notice:
+      invalidSessionCount > 0
+        ? 'Some invalid workout sessions were ignored while loading Supabase data.'
+        : undefined,
+  };
 }
 
 export async function saveProgram(program: WorkoutProgram): Promise<StorageMutationResult> {
-  if (!isSupabaseConfigured()) {
-    await saveLocalProgram(program);
-    return {
-      mode: 'local-cache',
-      notice: 'Saved locally because Supabase is not configured.',
-    };
+  assertSupabaseConfigured();
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from(PROGRAM_TABLE).upsert({
+    scope_id: REMOTE_SCOPE_ID,
+    program,
+    updated_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    throw new Error(`Supabase could not save the active week. ${error.message}`);
   }
 
-  try {
-    const supabase = getSupabaseClient();
-    const { error } = await supabase.from(PROGRAM_TABLE).upsert({
-      scope_id: REMOTE_SCOPE_ID,
-      program,
-      updated_at: new Date().toISOString(),
-    });
-
-    if (error) {
-      throw new Error(`Supabase could not save the active week. ${error.message}`);
-    }
-
-    await saveLocalProgram(program);
-
-    return {
-      mode: 'supabase',
-      notice: 'Synced to Supabase.',
-    };
-  } catch (error) {
-    await saveLocalProgram(program);
-    return {
-      mode: 'local-cache',
-      notice: `Saved locally only because Supabase is unavailable. ${getErrorMessage(error)}`,
-    };
-  }
+  return {
+    mode: 'supabase',
+    notice: 'Synced to Supabase.',
+  };
 }
 
 export async function upsertSession(
   session: WorkoutSession,
-  nextSessions: WorkoutSession[]
+  _nextSessions: WorkoutSession[]
 ): Promise<StorageMutationResult> {
-  if (!isSupabaseConfigured()) {
-    await saveLocalSessions(nextSessions);
-    return {
-      mode: 'local-cache',
-      notice: 'Saved locally because Supabase is not configured.',
-    };
+  assertSupabaseConfigured();
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from(SESSION_TABLE)
+    .upsert(mapWorkoutSessionToRemoteRow(session), { onConflict: 'id' });
+
+  if (error) {
+    throw new Error(`Supabase could not save this workout session. ${error.message}`);
   }
 
-  try {
-    const supabase = getSupabaseClient();
-    const { error } = await supabase
-      .from(SESSION_TABLE)
-      .upsert(mapWorkoutSessionToRemoteRow(session), { onConflict: 'id' });
-
-    if (error) {
-      throw new Error(`Supabase could not save this workout session. ${error.message}`);
-    }
-
-    await saveLocalSessions(nextSessions);
-
-    return {
-      mode: 'supabase',
-      notice: 'Synced to Supabase.',
-    };
-  } catch (error) {
-    await saveLocalSessions(nextSessions);
-    return {
-      mode: 'local-cache',
-      notice: `Saved locally only because Supabase is unavailable. ${getErrorMessage(error)}`,
-    };
-  }
+  return {
+    mode: 'supabase',
+    notice: 'Synced to Supabase.',
+  };
 }
 
 export async function deleteSession(
   sessionId: string,
-  nextSessions: WorkoutSession[],
-  nextLogs: ExerciseLog[]
+  _nextSessions: WorkoutSession[],
+  _nextLogs: ExerciseLog[]
 ): Promise<StorageMutationResult> {
-  if (!isSupabaseConfigured()) {
-    await saveLocalLogs(nextLogs);
-    await saveLocalSessions(nextSessions);
-    return {
-      mode: 'local-cache',
-      notice: 'Saved locally because Supabase is not configured.',
-    };
+  assertSupabaseConfigured();
+
+  const supabase = getSupabaseClient();
+  const [logDeleteResult, sessionDeleteResult] = await Promise.all([
+    supabase.from(LOG_TABLE).delete().eq('scope_id', REMOTE_SCOPE_ID).eq('session_id', sessionId),
+    supabase.from(SESSION_TABLE).delete().eq('scope_id', REMOTE_SCOPE_ID).eq('id', sessionId),
+  ]);
+
+  if (logDeleteResult.error) {
+    throw new Error(
+      `Supabase could not remove workout logs for this session. ${logDeleteResult.error.message}`
+    );
   }
 
-  try {
-    const supabase = getSupabaseClient();
-    const [logDeleteResult, sessionDeleteResult] = await Promise.all([
-      supabase.from(LOG_TABLE).delete().eq('scope_id', REMOTE_SCOPE_ID).eq('session_id', sessionId),
-      supabase.from(SESSION_TABLE).delete().eq('scope_id', REMOTE_SCOPE_ID).eq('id', sessionId),
-    ]);
-
-    if (logDeleteResult.error) {
-      throw new Error(`Supabase could not remove workout logs for this session. ${logDeleteResult.error.message}`);
-    }
-
-    if (sessionDeleteResult.error) {
-      throw new Error(`Supabase could not remove this workout session. ${sessionDeleteResult.error.message}`);
-    }
-
-    await saveLocalLogs(nextLogs);
-    await saveLocalSessions(nextSessions);
-
-    return {
-      mode: 'supabase',
-      notice: 'Synced to Supabase.',
-    };
-  } catch (error) {
-    await saveLocalLogs(nextLogs);
-    await saveLocalSessions(nextSessions);
-    return {
-      mode: 'local-cache',
-      notice: `Saved locally only because Supabase is unavailable. ${getErrorMessage(error)}`,
-    };
+  if (sessionDeleteResult.error) {
+    throw new Error(`Supabase could not remove this workout session. ${sessionDeleteResult.error.message}`);
   }
+
+  return {
+    mode: 'supabase',
+    notice: 'Synced to Supabase.',
+  };
 }
 
 export async function upsertExerciseLog(
   log: ExerciseLog,
-  nextLogs: ExerciseLog[]
+  _nextLogs: ExerciseLog[]
 ): Promise<StorageMutationResult> {
-  if (!isSupabaseConfigured()) {
-    await saveLocalLogs(nextLogs);
-    return {
-      mode: 'local-cache',
-      notice: 'Saved locally because Supabase is not configured.',
-    };
+  assertSupabaseConfigured();
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from(LOG_TABLE)
+    .upsert(mapExerciseLogToRemoteRow(log), { onConflict: 'id' });
+
+  if (error) {
+    throw new Error(`Supabase could not save this workout log. ${error.message}`);
   }
 
-  try {
-    const supabase = getSupabaseClient();
-    const { error } = await supabase
-      .from(LOG_TABLE)
-      .upsert(mapExerciseLogToRemoteRow(log), { onConflict: 'id' });
-
-    if (error) {
-      throw new Error(`Supabase could not save this workout log. ${error.message}`);
-    }
-
-    await saveLocalLogs(nextLogs);
-
-    return {
-      mode: 'supabase',
-      notice: 'Synced to Supabase.',
-    };
-  } catch (error) {
-    await saveLocalLogs(nextLogs);
-    return {
-      mode: 'local-cache',
-      notice: `Saved locally only because Supabase is unavailable. ${getErrorMessage(error)}`,
-    };
-  }
+  return {
+    mode: 'supabase',
+    notice: 'Synced to Supabase.',
+  };
 }
 
 export async function deleteExerciseLog(
   logId: string,
-  nextLogs: ExerciseLog[]
+  _nextLogs: ExerciseLog[]
 ): Promise<StorageMutationResult> {
-  if (!isSupabaseConfigured()) {
-    await saveLocalLogs(nextLogs);
-    return {
-      mode: 'local-cache',
-      notice: 'Saved locally because Supabase is not configured.',
-    };
+  assertSupabaseConfigured();
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from(LOG_TABLE)
+    .delete()
+    .eq('scope_id', REMOTE_SCOPE_ID)
+    .eq('id', logId);
+
+  if (error) {
+    throw new Error(`Supabase could not remove this workout log. ${error.message}`);
   }
 
-  try {
-    const supabase = getSupabaseClient();
-    const { error } = await supabase
-      .from(LOG_TABLE)
-      .delete()
-      .eq('scope_id', REMOTE_SCOPE_ID)
-      .eq('id', logId);
-
-    if (error) {
-      throw new Error(`Supabase could not remove this workout log. ${error.message}`);
-    }
-
-    await saveLocalLogs(nextLogs);
-
-    return {
-      mode: 'supabase',
-      notice: 'Synced to Supabase.',
-    };
-  } catch (error) {
-    await saveLocalLogs(nextLogs);
-    return {
-      mode: 'local-cache',
-      notice: `Saved locally only because Supabase is unavailable. ${getErrorMessage(error)}`,
-    };
-  }
+  return {
+    mode: 'supabase',
+    notice: 'Synced to Supabase.',
+  };
 }
 
 export async function replaceProgramAndClearLogs(
   program: WorkoutProgram
 ): Promise<StorageMutationResult> {
-  if (!isSupabaseConfigured()) {
-    await saveLocalSnapshot(program, [], []);
-    return {
-      mode: 'local-cache',
-      notice: 'Saved locally because Supabase is not configured.',
-    };
-  }
+  assertSupabaseConfigured();
 
-  try {
-    const supabase = getSupabaseClient();
-    const { error } = await supabase.rpc('replace_gym_program', {
-      p_scope_id: REMOTE_SCOPE_ID,
-      p_program: program,
-    });
-
-    if (error) {
-      throw new Error(`Supabase could not replace the program. ${error.message}`);
-    }
-
-    await saveLocalSnapshot(program, [], []);
-
-    return {
-      mode: 'supabase',
-      notice: 'Synced to Supabase.',
-    };
-  } catch (error) {
-    await saveLocalSnapshot(program, [], []);
-    return {
-      mode: 'local-cache',
-      notice: `Saved locally only because Supabase is unavailable. ${getErrorMessage(error)}`,
-    };
-  }
-}
-
-export async function clearLogsOnly(): Promise<StorageMutationResult> {
-  if (!isSupabaseConfigured()) {
-    await saveLocalLogs([]);
-    await saveLocalSessions([]);
-    return {
-      mode: 'local-cache',
-      notice: 'Saved locally because Supabase is not configured.',
-    };
-  }
-
-  try {
-    const supabase = getSupabaseClient();
-    const { error } = await supabase.rpc('clear_gym_logs', {
-      p_scope_id: REMOTE_SCOPE_ID,
-    });
-
-    if (error) {
-      throw new Error(`Supabase could not clear the workout logs. ${error.message}`);
-    }
-
-    await saveLocalLogs([]);
-    await saveLocalSessions([]);
-
-    return {
-      mode: 'supabase',
-      notice: 'Synced to Supabase.',
-    };
-  } catch (error) {
-    await saveLocalLogs([]);
-    await saveLocalSessions([]);
-    return {
-      mode: 'local-cache',
-      notice: `Saved locally only because Supabase is unavailable. ${getErrorMessage(error)}`,
-    };
-  }
-}
-
-async function loadLocalProgram() {
-  const value = await AsyncStorage.getItem(PROGRAM_STORAGE_KEY);
-  return value ? (JSON.parse(value) as WorkoutProgram) : null;
-}
-
-async function saveLocalProgram(program: WorkoutProgram) {
-  await AsyncStorage.setItem(PROGRAM_STORAGE_KEY, JSON.stringify(program));
-}
-
-async function loadLocalLogs() {
-  const value = await AsyncStorage.getItem(LOG_STORAGE_KEY);
-  return value ? (JSON.parse(value) as ExerciseLog[]) : [];
-}
-
-async function saveLocalLogs(logs: ExerciseLog[]) {
-  await AsyncStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(logs));
-}
-
-async function loadLocalSessions() {
-  const value = await AsyncStorage.getItem(SESSION_STORAGE_KEY);
-  return value ? (JSON.parse(value) as WorkoutSession[]) : [];
-}
-
-async function saveLocalSessions(sessions: WorkoutSession[]) {
-  await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions));
-}
-
-async function saveLocalSnapshot(
-  program: WorkoutProgram,
-  logs: ExerciseLog[],
-  sessions: WorkoutSession[]
-) {
-  await AsyncStorage.multiSet([
-    [PROGRAM_STORAGE_KEY, JSON.stringify(program)],
-    [LOG_STORAGE_KEY, JSON.stringify(logs)],
-    [SESSION_STORAGE_KEY, JSON.stringify(sessions)],
-  ]);
-}
-
-async function writeRemoteSnapshot(
-  program: WorkoutProgram,
-  logs: ExerciseLog[],
-  sessions: WorkoutSession[]
-) {
   const supabase = getSupabaseClient();
-  const replaceResult = await supabase.rpc('replace_gym_program', {
+  const { error } = await supabase.rpc('replace_gym_program', {
     p_scope_id: REMOTE_SCOPE_ID,
     p_program: program,
   });
 
-  if (replaceResult.error) {
-    throw new Error(
-      `Supabase could not initialize the workout program. ${replaceResult.error.message}`
-    );
+  if (error) {
+    throw new Error(`Supabase could not replace the program. ${error.message}`);
   }
 
-  if (sessions.length) {
-    const { error } = await supabase
-      .from(SESSION_TABLE)
-      .upsert(sessions.map(mapWorkoutSessionToRemoteRow), { onConflict: 'id' });
+  return {
+    mode: 'supabase',
+    notice: 'Synced to Supabase.',
+  };
+}
 
-    if (error) {
-      throw new Error(`Supabase could not migrate workout sessions. ${error.message}`);
-    }
-  }
+export async function clearLogsOnly(): Promise<StorageMutationResult> {
+  assertSupabaseConfigured();
 
-  if (!logs.length) {
-    return;
-  }
-
-  const { error } = await supabase
-    .from(LOG_TABLE)
-    .upsert(logs.map(mapExerciseLogToRemoteRow), { onConflict: 'id' });
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.rpc('clear_gym_logs', {
+    p_scope_id: REMOTE_SCOPE_ID,
+  });
 
   if (error) {
-    throw new Error(`Supabase could not migrate the saved workout logs. ${error.message}`);
+    throw new Error(`Supabase could not clear the workout logs. ${error.message}`);
   }
+
+  return {
+    mode: 'supabase',
+    notice: 'Synced to Supabase.',
+  };
 }
 
 function mapRemoteLogRow(row: RemoteLogRow): ExerciseLog {
@@ -638,19 +345,11 @@ function mapSetLog(setLog: SetLog): SetLog {
   };
 }
 
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (typeof error === 'string') {
-    return error;
-  }
-
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return 'Unknown error';
+function assertSupabaseConfigured() {
+  if (!isSupabaseConfigured()) {
+    throw new Error(
+      'Supabase is required for this app. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY.'
+    );
   }
 }
 
