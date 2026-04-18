@@ -51,6 +51,10 @@ export function getSessionLogByExerciseId(
 }
 
 export function countLoggedExercisesInSession(sessionId: string, logs: ExerciseLog[]) {
+  return getSessionLogs(sessionId, logs).filter((log) => log.setLogs.length > 0).length;
+}
+
+export function countHandledExercisesInSession(sessionId: string, logs: ExerciseLog[]) {
   return getSessionLogs(sessionId, logs).length;
 }
 

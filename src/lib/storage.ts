@@ -134,7 +134,6 @@ export async function saveProgram(program: WorkoutProgram): Promise<StorageMutat
 
   return {
     mode: 'supabase',
-    notice: 'Synced to Supabase.',
   };
 }
 
@@ -155,7 +154,6 @@ export async function upsertSession(
 
   return {
     mode: 'supabase',
-    notice: 'Synced to Supabase.',
   };
 }
 
@@ -184,7 +182,6 @@ export async function deleteSession(
 
   return {
     mode: 'supabase',
-    notice: 'Synced to Supabase.',
   };
 }
 
@@ -205,7 +202,6 @@ export async function upsertExerciseLog(
 
   return {
     mode: 'supabase',
-    notice: 'Synced to Supabase.',
   };
 }
 
@@ -228,7 +224,6 @@ export async function deleteExerciseLog(
 
   return {
     mode: 'supabase',
-    notice: 'Synced to Supabase.',
   };
 }
 
@@ -249,7 +244,6 @@ export async function replaceProgramAndClearLogs(
 
   return {
     mode: 'supabase',
-    notice: 'Synced to Supabase.',
   };
 }
 
@@ -267,7 +261,6 @@ export async function clearLogsOnly(): Promise<StorageMutationResult> {
 
   return {
     mode: 'supabase',
-    notice: 'Synced to Supabase.',
   };
 }
 

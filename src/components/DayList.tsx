@@ -18,20 +18,30 @@ type DayListProps = {
 export function DayList({ items, onSelectDay }: DayListProps) {
   return (
     <View style={styles.list}>
-      {items.map(({ day, status, completedAt, isNextUp }) => (
+      {items.map(({ day, status, completedAt, isNextUp }, index) => (
         <Pressable
           key={day.id}
           onPress={() => onSelectDay(day.id)}
-          style={[
+          style={({ pressed }) => [
             styles.row,
             status === 'in_progress' ? styles.rowActive : undefined,
             status === 'completed' ? styles.rowCompleted : undefined,
+            pressed ? styles.rowPressed : undefined,
           ]}
         >
           <View style={styles.rowTop}>
-            <View style={styles.dayMeta}>
-              <Text style={styles.dayName}>{day.name}</Text>
-              <Text style={styles.dayFocus}>{day.focus}</Text>
+            <View style={styles.leadingCluster}>
+              <View style={styles.dayOrderBadge}>
+                <Text style={styles.dayOrderText}>{String(index + 1).padStart(2, '0')}</Text>
+              </View>
+
+              <View style={styles.dayMeta}>
+                <View style={styles.dayNameRow}>
+                  <Text style={styles.dayName}>{day.name}</Text>
+                  <Text style={styles.openLabel}>Open</Text>
+                </View>
+                <Text style={styles.dayFocus}>{day.focus}</Text>
+              </View>
             </View>
 
             <View style={styles.statusArea}>
@@ -92,25 +102,43 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   row: {
-    backgroundColor: theme.colors.surfaceMuted,
+    backgroundColor: theme.colors.surfaceElevated,
     borderRadius: theme.radii.lg,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    padding: 16,
+    padding: 18,
     gap: 12,
+    shadowColor: theme.colors.shadow,
+    shadowOffset: {
+      width: 0,
+      height: 12,
+    },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 4,
+  },
+  rowPressed: {
+    transform: [{ scale: 0.99 }],
   },
   rowActive: {
     borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.accentSoft,
+    borderWidth: 2,
+    backgroundColor: theme.colors.surfaceElevated,
   },
   rowCompleted: {
     borderColor: theme.colors.successBorder,
-    backgroundColor: theme.colors.successSurface,
+    borderWidth: 2,
+    backgroundColor: theme.colors.surfaceElevated,
   },
   rowTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 12,
+  },
+  leadingCluster: {
+    flexDirection: 'row',
+    gap: 12,
+    flex: 1,
   },
   rowBottom: {
     flexDirection: 'row',
@@ -118,19 +146,49 @@ const styles = StyleSheet.create({
     gap: 10,
     alignItems: 'center',
   },
+  dayOrderBadge: {
+    width: 50,
+    height: 50,
+    borderRadius: 18,
+    backgroundColor: theme.colors.surfaceTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  dayOrderText: {
+    color: theme.colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
   dayMeta: {
     gap: 4,
     flex: 1,
+  },
+  dayNameRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    alignItems: 'center',
   },
   dayName: {
     color: theme.colors.text,
     fontSize: 22,
     fontWeight: '800',
+    letterSpacing: -0.4,
   },
   dayFocus: {
     color: theme.colors.muted,
     fontSize: 14,
-    lineHeight: 21,
+    lineHeight: 22,
+  },
+  openLabel: {
+    color: theme.colors.accent,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   statusArea: {
     alignItems: 'flex-end',

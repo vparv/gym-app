@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ExerciseLog, PlannedExercise, WorkoutDay, WorkoutSession } from '../types';
 import {
+  countHandledExercisesInSession,
   countLoggedExercisesInSession,
   getActiveSession,
   getCompletedSessionsForDay,
@@ -108,10 +109,24 @@ describe('session helpers', () => {
         loggedAt: '2026-04-11T18:10:00.000Z',
         setLogs: [{ setNumber: 1, weight: '100', repsCompleted: '8' }],
       },
+      {
+        id: 'log-2',
+        programExerciseId: 'exercise-2',
+        dayId: 'week-1-lower',
+        sessionId: 'session-2',
+        performedOptionKey: 'primary',
+        performedOptionLabel: 'Leg Press',
+        historyKey: 'leg-press',
+        weekNumber: 1,
+        dayName: 'Lower',
+        loggedAt: '2026-04-11T18:15:00.000Z',
+        setLogs: [],
+      },
     ];
 
     expect(countLoggedExercisesInSession('session-2', logs)).toBe(1);
-    expect(getNextExerciseForSession(exercises, 'session-2', logs)?.id).toBe('exercise-2');
+    expect(countHandledExercisesInSession('session-2', logs)).toBe(2);
+    expect(getNextExerciseForSession(exercises, 'session-2', logs)).toBeUndefined();
   });
 
   it('suggests the active day first and otherwise the first incomplete day', () => {

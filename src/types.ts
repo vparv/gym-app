@@ -101,5 +101,7 @@ export type ExerciseSetDraft = {
 export type ExerciseLogDraft = {
   selectedOptionKey: string;
   setLogs: ExerciseSetDraft[];
+  completedSetNumbers?: number[];
+  skippedSetNumbers?: number[];
   exerciseNote: string;
 };

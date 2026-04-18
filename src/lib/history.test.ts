@@ -39,6 +39,17 @@ describe('buildLatestLogsByHistoryKey', () => {
         loggedAt: '2026-01-08T10:00:00.000Z',
         setLogs: [{ setNumber: 1, weight: '75', repsCompleted: '9' }],
       },
+      {
+        id: '4',
+        programExerciseId: 'exercise-4',
+        performedOptionKey: 'primary',
+        performedOptionLabel: 'DB Bench Press',
+        historyKey: 'db-bench-press',
+        weekNumber: 3,
+        dayName: 'Push',
+        loggedAt: '2026-01-15T10:00:00.000Z',
+        setLogs: [],
+      },
     ];
 
     const latestLogs = buildLatestLogsByHistoryKey(logs);

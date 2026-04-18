@@ -9,17 +9,19 @@ type ExerciseCardProps = {
   focus: string;
   mode: 'review' | 'active' | 'summary';
   draft?: ExerciseLogDraft;
+  autoSaveState?: 'saving' | 'saved' | 'error';
   latestLog?: ExerciseLog;
   sessionLog?: ExerciseLog;
   isNextUp?: boolean;
   onDraftChange?: (draft: ExerciseLogDraft) => void;
   onPlayVideo: (label: string, url: string, notes: string) => void;
-  onOpenUrl: (url: string) => void;
+  onOpenUrl?: (url: string) => void;
   onStartLog?: (optionKey: string) => void;
-  onSave?: () => void;
+  onSkipExercise?: (optionKey: string) => void;
   onCancelEdit?: () => void;
   onEditLog?: () => void;
   onRemoveLog?: () => void;
+  showInlineLogger?: boolean;
 };
 
 export function ExerciseCard({
@@ -27,20 +29,22 @@ export function ExerciseCard({
   focus,
   mode,
   draft,
+  autoSaveState,
   latestLog,
   sessionLog,
   isNextUp = false,
   onDraftChange,
   onPlayVideo,
-  onOpenUrl,
   onStartLog,
-  onSave,
+  onSkipExercise,
   onCancelEdit,
   onEditLog,
   onRemoveLog,
+  showInlineLogger = false,
 }: ExerciseCardProps) {
   const { width } = useWindowDimensions();
   const [metaGridWidth, setMetaGridWidth] = React.useState(0);
+  const [isExpanded, setIsExpanded] = React.useState(false);
   const [previewOptionKey, setPreviewOptionKey] = React.useState(
     sessionLog?.performedOptionKey ?? draft?.selectedOptionKey ?? exercise.defaultOptionKey
   );
@@ -54,8 +58,11 @@ export function ExerciseCard({
     exercise.options.find((option) => option.key === selectedOptionKey) ?? exercise.options[0];
   const historyLog = latestLog && latestLog.id !== sessionLog?.id ? latestLog : undefined;
   const isEditing = Boolean(draft);
+  const isSkippedSessionLog = Boolean(sessionLog && sessionLog.setLogs.length === 0);
   const canPreviewOptions = !draft && !sessionLog;
-  const isCompactLoggedState = mode === 'active' && Boolean(sessionLog) && !isEditing;
+  const shouldShowCompactHandledState =
+    mode === 'active' && Boolean(sessionLog) && !isEditing && !isExpanded;
+  const alternativeOptions = exercise.options.filter((option) => option.key !== selectedOption.key);
 
   React.useEffect(() => {
     if (draft?.selectedOptionKey) {
@@ -69,7 +76,19 @@ export function ExerciseCard({
     }
   }, [sessionLog?.performedOptionKey]);
 
-  if (isCompactLoggedState && sessionLog) {
+  React.useEffect(() => {
+    if (draft) {
+      setIsExpanded(true);
+    }
+  }, [draft]);
+
+  React.useEffect(() => {
+    if (mode === 'active' && sessionLog && !draft) {
+      setIsExpanded(false);
+    }
+  }, [draft, mode, sessionLog?.id, sessionLog?.loggedAt]);
+
+  if (shouldShowCompactHandledState && sessionLog) {
     const content = (
       <>
         <View style={styles.compactLoggedHeader}>
@@ -77,109 +96,108 @@ export function ExerciseCard({
             <Text style={[styles.compactLoggedTitle, isCompact ? styles.compactLoggedTitleCompact : undefined]}>
               {sessionLog.performedOptionLabel}
             </Text>
-            <Text style={styles.compactLoggedSubtitle}>Tap to edit logged sets</Text>
+            <Text style={styles.compactLoggedSubtitle}>
+              {isSkippedSessionLog
+                ? 'Skipped for this workout. Tap to reopen details.'
+                : 'Logged in this workout. Tap to reopen details.'}
+            </Text>
           </View>
 
-          <Text style={styles.loggedBadge}>Logged</Text>
+          <Text style={isSkippedSessionLog ? styles.skippedBadge : styles.loggedBadge}>
+            {isSkippedSessionLog ? 'Skipped' : 'Logged'}
+          </Text>
         </View>
 
-        <View style={styles.compactLoggedSetList}>
-          {sessionLog.setLogs.map((setLog) => (
-            <View key={setLog.setNumber} style={styles.compactLoggedSetRow}>
-              <Text style={styles.compactLoggedSetLabel}>Set {setLog.setNumber}</Text>
-              <Text style={styles.compactLoggedSetValue}>{formatCompactSetSummary(setLog)}</Text>
-            </View>
-          ))}
-        </View>
+        {isSkippedSessionLog ? (
+          <View style={styles.compactLoggedSetRow}>
+            <Text style={styles.compactLoggedSetLabel}>Session status</Text>
+            <Text style={styles.compactLoggedSetValue}>Skipped</Text>
+          </View>
+        ) : (
+          <View style={styles.compactLoggedSetList}>
+            {sessionLog.setLogs.map((setLog) => (
+              <View key={setLog.setNumber} style={styles.compactLoggedSetRow}>
+                <Text style={styles.compactLoggedSetLabel}>Set {setLog.setNumber}</Text>
+                <Text style={styles.compactLoggedSetValue}>{formatCompactSetSummary(setLog)}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </>
     );
 
-    if (onEditLog) {
-      return (
-        <Pressable
-          onPress={onEditLog}
-          style={({ pressed }) => [
-            styles.card,
-            styles.compactLoggedCard,
-            isCompact ? styles.cardCompact : undefined,
-            pressed ? styles.compactLoggedCardPressed : undefined,
-          ]}
-        >
-          {content}
-        </Pressable>
-      );
-    }
-
     return (
-      <View style={[styles.card, styles.compactLoggedCard, isCompact ? styles.cardCompact : undefined]}>
+      <Pressable
+        onPress={() => setIsExpanded(true)}
+        style={({ pressed }) => [
+          styles.card,
+          styles.compactLoggedCard,
+          isCompact ? styles.cardCompact : undefined,
+          pressed ? styles.compactLoggedCardPressed : undefined,
+        ]}
+      >
         {content}
-      </View>
+      </Pressable>
     );
   }
 
   return (
     <View style={[styles.card, isCompact ? styles.cardCompact : undefined]}>
       <View style={styles.header}>
-        <View style={[styles.headerTopRow, isCompact ? styles.headerTopRowCompact : undefined]}>
+        <View style={styles.headerTopRow}>
           <View style={styles.headerCopy}>
-            <View style={styles.headerBadges}>
-              <Text style={styles.focusBadge}>{focus}</Text>
-              {mode === 'active' && sessionLog && !isEditing ? (
-                <Text style={styles.loggedBadge}>Logged this workout</Text>
-              ) : null}
-              {mode === 'active' && !sessionLog && isNextUp ? (
-                <Text style={styles.nextBadge}>Up next</Text>
-              ) : null}
-              {mode === 'summary' && sessionLog ? <Text style={styles.loggedBadge}>Completed</Text> : null}
-            </View>
-
             <Text style={[styles.title, isCompact ? styles.titleCompact : undefined]}>
               {selectedOption.label}
             </Text>
-            <Text style={[styles.subtitle, isCompact ? styles.subtitleCompact : undefined]}>
-              Prescribed slot: {exercise.options[0]?.label}
-            </Text>
           </View>
 
-          <View style={[styles.headerActions, isCompact ? styles.headerActionsCompact : undefined]}>
+          <View style={styles.headerActions}>
             <Pressable
               onPress={() => onPlayVideo(selectedOption.label, selectedOption.videoUrl, exercise.notes)}
               style={styles.playButton}
             >
               <Text style={styles.playButtonText}>Play video</Text>
             </Pressable>
-
-            <Pressable
-              onPress={() => onOpenUrl(selectedOption.videoUrl)}
-              style={[styles.linkButton, isCompact ? styles.linkButtonCompact : undefined]}
-            >
-              <Text style={styles.linkButtonText}>Open in YouTube</Text>
-            </Pressable>
           </View>
         </View>
+
+        {(mode === 'active' && sessionLog && !isEditing) ||
+        (mode === 'active' && !sessionLog && isNextUp) ||
+        (mode === 'summary' && sessionLog) ? (
+          <View style={styles.headerBadges}>
+            {mode === 'active' && sessionLog && !isEditing ? (
+              <Text style={isSkippedSessionLog ? styles.skippedBadge : styles.loggedBadge}>
+                {isSkippedSessionLog ? 'Skipped this workout' : 'Logged this workout'}
+              </Text>
+            ) : null}
+            {mode === 'active' && !sessionLog && isNextUp ? (
+              <Text style={styles.nextBadge}>Up next</Text>
+            ) : null}
+            {mode === 'summary' && sessionLog ? (
+              <Text style={isSkippedSessionLog ? styles.skippedBadge : styles.loggedBadge}>
+                {isSkippedSessionLog ? 'Skipped' : 'Completed'}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
       </View>
 
-      <View style={styles.optionsRow}>
-        {exercise.options.map((option) => {
-          const isSelected = option.key === selectedOption.key;
-
-          return (
+      {alternativeOptions.length ? (
+        <View style={styles.optionsRow}>
+          {alternativeOptions.map((option) => (
             <Pressable
               key={option.key}
               disabled={!canPreviewOptions}
               onPress={() => setPreviewOptionKey(option.key)}
-              style={[styles.optionChip, isSelected ? styles.optionChipSelected : undefined]}
+              style={[styles.optionChip, !canPreviewOptions ? styles.optionChipDisabled : undefined]}
             >
-              <Text style={[styles.optionLabel, isSelected ? styles.optionLabelSelected : undefined]}>
-                {option.isPrimary ? 'Prescribed' : 'Substitution'}
-              </Text>
-              <Text style={[styles.optionValue, isSelected ? styles.optionValueSelected : undefined]}>
+              <Text numberOfLines={2} style={styles.optionValue}>
                 {option.label}
               </Text>
             </Pressable>
-          );
-        })}
-      </View>
+          ))}
+        </View>
+      ) : null}
 
       <View
         style={styles.metaGrid}
@@ -250,24 +268,40 @@ export function ExerciseCard({
       {sessionLog ? (
         <View style={styles.historyCard}>
           <Text style={styles.historyLabel}>
-            {mode === 'summary' ? 'Completed in this workout' : 'Logged in this workout'}
+            {isSkippedSessionLog
+              ? 'Skipped in this workout'
+              : mode === 'summary'
+                ? 'Completed in this workout'
+                : 'Logged in this workout'}
           </Text>
           <Text style={styles.historyDate}>
             {formatLogDate(sessionLog.loggedAt)} · {sessionLog.performedOptionLabel}
           </Text>
-          <Text style={styles.historyBody}>{formatSetSummary(sessionLog)}</Text>
-          {sessionLog.exerciseNote ? (
+          <Text style={styles.historyBody}>
+            {isSkippedSessionLog
+              ? 'This exercise is marked as skipped for the current session.'
+              : formatSetSummary(sessionLog)}
+          </Text>
+          {!isSkippedSessionLog && sessionLog.exerciseNote ? (
             <Text style={styles.historyNote}>Note: {sessionLog.exerciseNote}</Text>
           ) : null}
 
           {mode === 'active' && !isEditing ? (
             <View style={styles.sessionActionRow}>
               <Pressable onPress={onEditLog} style={styles.inlineButton}>
-                <Text style={styles.inlineButtonText}>Edit log</Text>
+                <Text style={styles.inlineButtonText}>
+                  {isSkippedSessionLog ? 'Log instead' : 'Edit log'}
+                </Text>
               </Pressable>
 
               <Pressable onPress={onRemoveLog} style={styles.inlineButtonDanger}>
-                <Text style={styles.inlineButtonDangerText}>Remove log</Text>
+                <Text style={styles.inlineButtonDangerText}>
+                  {isSkippedSessionLog ? 'Undo skip' : 'Clear entry'}
+                </Text>
+              </Pressable>
+
+              <Pressable onPress={() => setIsExpanded(false)} style={styles.inlineButton}>
+                <Text style={styles.inlineButtonText}>Back to summary</Text>
               </Pressable>
             </View>
           ) : null}
@@ -283,38 +317,29 @@ export function ExerciseCard({
         </View>
       ) : null}
 
-      {mode === 'review' ? (
-        <View style={styles.reviewStateCard}>
-          <Text style={styles.reviewStateTitle}>Ready when you are</Text>
-          <Text style={styles.reviewStateBody}>
-            Start a workout session to log this exercise for today.
-          </Text>
-        </View>
-      ) : null}
-
-      {mode === 'active' && !sessionLog && !isEditing ? (
-        <View style={styles.reviewStateCard}>
-          <Text style={styles.reviewStateTitle}>{isNextUp ? 'Suggested next exercise' : 'Not logged yet'}</Text>
-          <Text style={styles.reviewStateBody}>
-            {isNextUp
-              ? 'This is the first exercise you have not logged in the current workout.'
-              : 'You can log this exercise whenever you want in the session.'}
-          </Text>
-          <Pressable onPress={() => onStartLog?.(selectedOption.key)} style={styles.primaryActionButton}>
-            <Text style={styles.primaryActionButtonText}>Log this exercise</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
-      {mode === 'active' && draft && onDraftChange ? (
+      {mode === 'active' && draft && onDraftChange && showInlineLogger ? (
         <ExerciseLogger
           exercise={exercise}
           draft={draft}
+          autoSaveState={autoSaveState}
           isEditingExistingLog={Boolean(sessionLog)}
           onDraftChange={onDraftChange}
-          onSave={onSave}
           onCancel={onCancelEdit}
         />
+      ) : null}
+
+      {!sessionLog && !isEditing ? (
+        <View style={styles.footerActionRow}>
+          {mode === 'active' ? (
+            <Pressable onPress={() => onSkipExercise?.(selectedOption.key)} style={styles.footerSkipButton}>
+              <Text style={styles.footerSkipButtonText}>Skip</Text>
+            </Pressable>
+          ) : null}
+
+          <Pressable onPress={() => onStartLog?.(selectedOption.key)} style={styles.footerStartButton}>
+            <Text style={styles.footerStartButtonText}>Start</Text>
+          </Pressable>
+        </View>
       ) : null}
     </View>
   );
@@ -323,16 +348,16 @@ export function ExerciseCard({
 function ExerciseLogger({
   exercise,
   draft,
+  autoSaveState,
   isEditingExistingLog,
   onDraftChange,
-  onSave,
   onCancel,
 }: {
   exercise: PlannedExercise;
   draft: ExerciseLogDraft;
+  autoSaveState?: 'saving' | 'saved' | 'error';
   isEditingExistingLog: boolean;
   onDraftChange: (draft: ExerciseLogDraft) => void;
-  onSave?: () => void;
   onCancel?: () => void;
 }) {
   const currentSetLog = draft.setLogs[draft.setLogs.length - 1];
@@ -345,14 +370,23 @@ function ExerciseLogger({
     draft.setLogs.length > 1 &&
     currentSetLog.weight.trim().length === 0 &&
     currentSetLog.repsCompleted.trim().length === 0;
-  const isSaveDisabled = startedSetCount === 0 || hasIncompleteStartedSet;
+  const statusMessage =
+    startedSetCount === 0
+      ? 'Changes save automatically after you log your first complete set.'
+      : hasIncompleteStartedSet
+        ? 'Changes save automatically as soon as every started set has a weight.'
+        : autoSaveState === 'saving'
+          ? 'Saving changes...'
+          : autoSaveState === 'error'
+            ? 'Could not save the latest changes. Keep editing to retry.'
+            : autoSaveState === 'saved'
+              ? 'Changes saved automatically.'
+              : 'Changes save automatically.';
 
   return (
     <View style={styles.logger}>
       <Text style={styles.loggerTitle}>{isEditingExistingLog ? 'Edit this exercise' : 'Log working sets'}</Text>
-      <Text style={styles.loggerSubtitle}>
-        Save only when the weights for every started set are filled in.
-      </Text>
+      <Text style={styles.loggerSubtitle}>{statusMessage}</Text>
 
       <View style={styles.optionSelector}>
         {exercise.options.map((option) => {
@@ -475,16 +509,8 @@ function ExerciseLogger({
       </View>
 
       <View style={styles.loggerActions}>
-        <Pressable
-          disabled={isSaveDisabled}
-          onPress={onSave}
-          style={[styles.saveButton, isSaveDisabled ? styles.saveButtonDisabled : undefined]}
-        >
-          <Text style={styles.saveButtonText}>{isEditingExistingLog ? 'Update log' : 'Save log'}</Text>
-        </Pressable>
-
         <Pressable onPress={onCancel} style={styles.cancelButton}>
-          <Text style={styles.cancelButtonText}>Cancel</Text>
+          <Text style={styles.cancelButtonText}>Close</Text>
         </Pressable>
       </View>
     </View>
@@ -637,12 +663,20 @@ function formatCompactSetSummary(setLog: ExerciseLog['setLogs'][number]) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: theme.colors.surface,
+    backgroundColor: theme.colors.surfaceElevated,
     borderRadius: theme.radii.xl,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    padding: 20,
-    gap: 16,
+    padding: 22,
+    gap: 18,
+    shadowColor: theme.colors.shadow,
+    shadowOffset: {
+      width: 0,
+      height: 16,
+    },
+    shadowOpacity: 0.08,
+    shadowRadius: 22,
+    elevation: 6,
   },
   cardCompact: {
     padding: 16,
@@ -650,9 +684,10 @@ const styles = StyleSheet.create({
   },
   compactLoggedCard: {
     gap: 12,
+    backgroundColor: theme.colors.surfaceMuted,
   },
   compactLoggedCardPressed: {
-    opacity: 0.85,
+    transform: [{ scale: 0.99 }],
   },
   compactLoggedHeader: {
     flexDirection: 'row',
@@ -687,8 +722,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: theme.colors.surfaceMuted,
+    backgroundColor: theme.colors.surface,
     borderRadius: theme.radii.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -711,26 +748,26 @@ const styles = StyleSheet.create({
   },
   headerTopRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'stretch',
     gap: 12,
   },
   headerTopRowCompact: {
     flexDirection: 'column',
   },
   headerCopy: {
-    gap: 6,
     flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
   },
   headerBadges: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-  focusBadge: {
+  loggedBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: theme.colors.badge,
-    color: theme.colors.badgeText,
+    backgroundColor: theme.colors.successSurface,
+    color: theme.colors.successText,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
@@ -739,10 +776,10 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  loggedBadge: {
+  skippedBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: theme.colors.successSurface,
-    color: theme.colors.successText,
+    backgroundColor: theme.colors.surfaceTint,
+    color: theme.colors.muted,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
@@ -768,6 +805,7 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: '800',
     lineHeight: 32,
+    letterSpacing: -0.5,
   },
   titleCompact: {
     fontSize: 22,
@@ -783,9 +821,10 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   headerActions: {
-    alignItems: 'stretch',
-    gap: 10,
-    minWidth: 154,
+    flexBasis: '42%',
+    flexGrow: 0,
+    flexShrink: 0,
+    justifyContent: 'center',
   },
   headerActionsCompact: {
     width: '100%',
@@ -794,17 +833,28 @@ const styles = StyleSheet.create({
   playButton: {
     backgroundColor: theme.colors.accent,
     borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    minHeight: 42,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    justifyContent: 'center',
+    shadowColor: theme.colors.shadow,
+    shadowOffset: {
+      width: 0,
+      height: 6,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 2,
   },
   playButtonText: {
     color: theme.colors.accentText,
     fontSize: 14,
     fontWeight: '800',
+    letterSpacing: -0.2,
     textAlign: 'center',
   },
   linkButton: {
-    backgroundColor: theme.colors.surface,
+    backgroundColor: theme.colors.surfaceMuted,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: theme.colors.borderStrong,
@@ -828,41 +878,41 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   optionsRow: {
-    gap: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'stretch',
+    gap: 8,
   },
   optionChip: {
-    backgroundColor: theme.colors.chip,
-    borderRadius: theme.radii.lg,
-    padding: 14,
-    gap: 4,
+    flexBasis: '48%',
+    flexGrow: 1,
+    minWidth: 0,
+    backgroundColor: theme.colors.surfaceTint,
+    borderRadius: theme.radii.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    justifyContent: 'center',
+    gap: 3,
   },
-  optionChipSelected: {
-    backgroundColor: theme.colors.chipSelected,
-  },
-  optionLabel: {
-    color: theme.colors.muted,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  optionLabelSelected: {
-    color: theme.colors.accentText,
+  optionChipDisabled: {
+    opacity: 0.72,
   },
   optionValue: {
     color: theme.colors.text,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '700',
-    lineHeight: 21,
-  },
-  optionValueSelected: {
-    color: theme.colors.chipSelectedText,
+    lineHeight: 19,
+    textAlign: 'center',
   },
   optionSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   optionSelectorChip: {
-    backgroundColor: theme.colors.surfaceMuted,
+    backgroundColor: theme.colors.surface,
     borderRadius: theme.radii.md,
     borderWidth: 1,
     borderColor: theme.colors.border,
@@ -887,7 +937,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   metaCard: {
-    backgroundColor: theme.colors.surfaceMuted,
+    backgroundColor: theme.colors.surface,
     borderRadius: theme.radii.md,
     borderWidth: 1,
     borderColor: theme.colors.border,
@@ -918,9 +968,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   callout: {
-    backgroundColor: theme.colors.canvas,
-    borderRadius: theme.radii.md,
-    padding: 14,
+    backgroundColor: theme.colors.surfaceTint,
+    borderRadius: theme.radii.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    padding: 15,
     gap: 4,
   },
   calloutLabel: {
@@ -967,7 +1019,9 @@ const styles = StyleSheet.create({
   },
   secondaryHistoryCard: {
     backgroundColor: theme.colors.surfaceMuted,
-    borderRadius: theme.radii.md,
+    borderRadius: theme.radii.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
     padding: 14,
     gap: 4,
   },
@@ -992,6 +1046,8 @@ const styles = StyleSheet.create({
   inlineButton: {
     backgroundColor: theme.colors.surface,
     borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.colors.borderStrong,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -1003,6 +1059,8 @@ const styles = StyleSheet.create({
   inlineButtonDanger: {
     backgroundColor: theme.colors.errorSurface,
     borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.colors.errorBorder,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -1011,42 +1069,55 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  reviewStateCard: {
-    backgroundColor: theme.colors.surfaceMuted,
-    borderRadius: theme.radii.md,
+  footerActionRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 10,
+  },
+  footerSkipButton: {
+    flex: 1,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: 14,
-    gap: 8,
-  },
-  reviewStateTitle: {
-    color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  reviewStateBody: {
-    color: theme.colors.muted,
-    fontSize: 14,
-    lineHeight: 22,
-  },
-  primaryActionButton: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radii.md,
-    paddingHorizontal: 14,
+    borderColor: theme.colors.borderStrong,
+    paddingHorizontal: 18,
     paddingVertical: 12,
-    alignSelf: 'flex-start',
+    justifyContent: 'center',
   },
-  primaryActionButtonText: {
+  footerSkipButtonText: {
+    color: theme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  footerStartButton: {
+    flex: 1,
+    backgroundColor: theme.colors.accent,
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    justifyContent: 'center',
+    shadowColor: theme.colors.shadow,
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  footerStartButtonText: {
     color: theme.colors.accentText,
     fontSize: 14,
     fontWeight: '800',
+    textAlign: 'center',
   },
   logger: {
     backgroundColor: theme.colors.surfaceMuted,
-    borderRadius: theme.radii.md,
+    borderRadius: theme.radii.lg,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    padding: 14,
+    padding: 16,
     gap: 14,
   },
   loggerTitle: {
@@ -1063,6 +1134,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     backgroundColor: theme.colors.errorSurface,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.errorBorder,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -1070,6 +1143,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     backgroundColor: theme.colors.accentSoft,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.accentSoft,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -1088,10 +1163,10 @@ const styles = StyleSheet.create({
   },
   setRow: {
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.md,
+    borderRadius: theme.radii.lg,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    padding: 12,
+    padding: 14,
     gap: 12,
   },
   setRowHeader: {
@@ -1137,13 +1212,13 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: theme.colors.input,
-    borderRadius: theme.radii.md,
+    borderRadius: theme.radii.lg,
     borderWidth: 1,
     borderColor: theme.colors.inputBorder,
     color: theme.colors.text,
     fontSize: 15,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 13,
   },
   noteField: {
     gap: 6,
@@ -1157,7 +1232,7 @@ const styles = StyleSheet.create({
   },
   addSetButton: {
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.md,
+    borderRadius: theme.radii.lg,
     borderWidth: 1,
     borderColor: theme.colors.borderStrong,
     paddingHorizontal: 14,
@@ -1171,7 +1246,9 @@ const styles = StyleSheet.create({
   },
   removeSetButton: {
     backgroundColor: theme.colors.errorSurface,
-    borderRadius: theme.radii.md,
+    borderRadius: theme.radii.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.errorBorder,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
@@ -1184,24 +1261,9 @@ const styles = StyleSheet.create({
   loggerActions: {
     gap: 10,
   },
-  saveButton: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radii.md,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-  },
-  saveButtonDisabled: {
-    opacity: 0.5,
-  },
-  saveButtonText: {
-    color: theme.colors.accentText,
-    fontSize: 15,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
   cancelButton: {
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.md,
+    borderRadius: theme.radii.lg,
     borderWidth: 1,
     borderColor: theme.colors.borderStrong,
     paddingHorizontal: 14,
